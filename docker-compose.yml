@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres
+    container_name: databases
+    restart: always
+    ports:
+      - "${DBPORT}:5432"
+    environment:
+      POSTGRES_USER: ${DBUSER}
+      POSTGRES_PASSWORD: ${DBPASSWORD}
+      POSTGRES_DB: ${DBNAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
+
+volumes:
+  postgres_data:

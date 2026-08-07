@@ -1,0 +1,13 @@
+# Build output
+/eduberza
+/bots/bots
+
+# Local configuration and secrets — never commit; use .env.example as template
+.env
+
+# Editor settings
+.vscode/
+
+*.jar
+docs/Instructions.md
+Instructions.md
