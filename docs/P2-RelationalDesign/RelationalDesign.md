@@ -95,30 +95,13 @@ The script that loads realistic sample data is [`../server/db/data_load.sql`](..
 
 ![relational_schema](relational_schema.jpg)
 
-Generated in **DBeaver** from the **live** `project` schema, in crow's-foot
+Generated in **Pgadmin** from the **live** `project` schema, in crow's-foot
 notation — not drawn by hand, so it is evidence that the deployed database
 actually matches the design described above. Each box is a table with its
 columns and declared types; key icons mark primary keys and the arrowed lines
 are the 12 declared foreign keys.
 
 ### How to regenerate it
-
-**With DBeaver** (the tool the course recommends):
-
-1. Connect to the assigned FINKI PostgreSQL project database.
-2. Double-click the `project` schema → **ER Diagram** tab.
-3. Right-click in the diagram → **Notation** → **Crow's foot**.
-4. Arrange the tables to mirror the layout of
-   [`ERModel_v01.png`](../P1-ConceptualModel/ERModel_v01.png).
-5. Right-click → **Export diagram** → save as `relational_schema.jpg`.
-
-On Linux, install it with:
-
-```sh
-flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub io.dbeaver.DBeaverCommunity
-# or:  sudo snap install dbeaver-ce
-```
 
 **With pgAdmin 4**, if DBeaver is unavailable — it reads the live schema the same
 way, so the result is equivalent in substance:
@@ -130,8 +113,3 @@ way, so the result is equivalent in substance:
 4. **Download image** → PNG, then convert:
    `convert relational_schema.png relational_schema.jpg`
 
-Whichever tool is used, state it here so the choice is explicit rather than
-inferred. Do **not** substitute a tool that only reads the `.sql` file — such as
-dbdiagram.io — because the diagram would then show what the script says rather
-than what the deployed database contains, which is the thing this artefact is
-meant to demonstrate.

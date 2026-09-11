@@ -1,15 +1,9 @@
-# Entity-Relationship Model v.01
+# Entity-Relationship Model v.02
 
 ## Diagram
 
-![ERModel_v01](ERModel_v01.png)
+![ERModel_v02](ERModel_v02.png)
 
-Attachments for this page: `ERModel_v01.xml` (TerraER source) and `ERModel_v01.png`
-(exported image). Open the source with TerraER 3.11:
-
-```sh
-java -jar TerraER3.11.jar     # then File → Open → ERModel_v01.xml
-```
 
 Notation: Chen. Rectangles are entity sets, diamonds are relationships, ellipses
 are attributes, underlined ellipses are primary keys, the dashed ellipse is a

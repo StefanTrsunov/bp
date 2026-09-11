@@ -6,6 +6,8 @@
 
 ## Short description
 
+Eduberza - Educational Market simulation
+
 This project is a simulation of a crypto exchange, intended for beginners and
 created as a project for the Databases course for 2025-2026. The project is
 inspired by TradingView/Binance and aims to let users experience buying and
@@ -66,7 +68,7 @@ Target Audience: Beginners and general users who want to learn how cryptocurrenc
 
 This is only for education purposes. The problem is fixing the financial literacy of the people.
 
-### Who uses the system? What types of users exist?
+### What types of users exist?
 
 Roles/Users that are expected to use this product are:
 

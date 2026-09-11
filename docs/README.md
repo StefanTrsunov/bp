@@ -76,8 +76,10 @@ required. P5 is the recommended next one.
 
 | File | Phase | What |
 |------|-------|------|
-| [`ERModel_v01.xml`](P1-ConceptualModel/ERModel_v01.xml) | P1 | TerraER source of the ER diagram |
-| [`ERModel_v01.png`](P1-ConceptualModel/ERModel_v01.png) | P1 | Exported diagram image |
+| [`ERModel_v02.xml`](P1-ConceptualModel/ERModel_v02.xml) | P1 | TerraER source, current version |
+| [`ERModel_v02.png`](P1-ConceptualModel/ERModel_v02.png) | P1 | Exported diagram image, current version |
+| [`ERModel_v01.xml`](P1-ConceptualModel/ERModel_v01.xml) | P1 | TerraER source, first version (kept per P1 rules) |
+| [`ERModel_v01.png`](P1-ConceptualModel/ERModel_v01.png) | P1 | Exported diagram image, first version |
 | [`../server/db/schema_creation.sql`](../server/db/schema_creation.sql) | P2 | DDL — drops and recreates the `project` schema |
 | [`../server/db/data_load.sql`](../server/db/data_load.sql) | P2 | DML — truncates and reloads sample data |
 | [`relational_schema.jpg`](P2-RelationalDesign/relational_schema.jpg) | P2 | Crow's-foot diagram exported from DBeaver |
