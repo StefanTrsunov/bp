@@ -125,3 +125,33 @@ exactly as it is.
 > are real output, not invented, so they can be checked against
 > [`reports_demo_data.sql`](../../server/db/reports_demo_data.sql) directly. Append any further
 > prompts here if you ask for revisions.
+
+### Follow-up — 2026-09-17
+
+**Intent:** simplify the market performance report after seeing it run — with only a handful
+of trades per market in most periods, price volatility read as noise rather than a useful
+signal.
+
+**Prompt (student, verbatim):**
+> Can you tell me the exact database_url so I can execute the schema creating and the data_load?
+>
+> From the Market Performance can we remove Volatility, I don't think that is that useful, also
+> can you tell me what is users column?
+
+**Response (AI, summarised):**
+- Gave the local dev connection string (`postgresql://bp_project:1234@localhost:5433/bp_database`,
+  from `.env`) and explained `participating_users` is `COUNT(DISTINCT user_id)` from that
+  market's executed orders, not from `market_trades` (which has no `user_id`).
+- Removed `price_volatility`/`STDDEV(price)` from `report_market_performance()` in
+  `schema_creation.sql`, from its `RETURNS TABLE` and its `SELECT`, and from the corresponding
+  column in `server/reports.go`'s `ShowMarketPerformance`.
+- Updated the relational algebra (`Stats`, `Result`) and the SQL listing, verified run output,
+  and prose in [AdvancedReports.md](AdvancedReports.md) to match, and added a short note
+  explaining why the column was dropped.
+- Rebuilt, re-ran `-init` and `reports_demo_data.sql` against the live database, and
+  re-verified the market performance report through the actual CLI before and after the
+  change to confirm only the one column disappeared and every other number is unchanged.
+
+**What I decided:** to drop the column entirely rather than keep it computed-but-hidden,
+since an unused computation left in the query is exactly the kind of thing that should not
+survive a review.

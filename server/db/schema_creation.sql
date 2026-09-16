@@ -260,7 +260,6 @@ RETURNS TABLE (
     trade_count          bigint,
     avg_price            numeric,
     market_return_pct    numeric,
-    price_volatility     numeric,
     participating_users  bigint
 )
 LANGUAGE sql STABLE AS $$
@@ -280,7 +279,6 @@ LANGUAGE sql STABLE AS $$
             SUM(quantity)    AS total_volume,
             COUNT(*)         AS trade_count,
             AVG(price)       AS avg_price,
-            STDDEV(price)    AS price_volatility,
             MAX(first_price) AS first_price,
             MAX(last_price)  AS last_price
         FROM trades
@@ -299,7 +297,6 @@ LANGUAGE sql STABLE AS $$
         ms.trade_count,
         ROUND(ms.avg_price, 6)                                                            AS avg_price,
         ROUND((ms.last_price - ms.first_price) / NULLIF(ms.first_price, 0) * 100, 2)      AS market_return_pct,
-        ROUND(COALESCE(ms.price_volatility, 0), 6)                                        AS price_volatility,
         COALESCE(p.participating_users, 0)                                                AS participating_users
     FROM market_stats ms
     JOIN project.markets m ON m.id = ms.market_id

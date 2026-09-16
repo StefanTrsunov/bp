@@ -80,8 +80,8 @@ func ShowMarketPerformance(s *Session) {
 	}
 	defer rows.Close()
 
-	header := fmt.Sprintf("  %-6s  %-5s  %12s  %8s  %14s  %12s  %14s  %8s",
-		"Symbol", "Quote", "Volume", "Trades", "Avg Price", "Return %", "Volatility", "Users")
+	header := fmt.Sprintf("  %-6s  %-5s  %12s  %8s  %14s  %12s  %8s",
+		"Symbol", "Quote", "Volume", "Trades", "Avg Price", "Return %", "Users")
 	fmt.Println()
 	fmt.Println(header)
 	fmt.Println("  " + strings.Repeat("-", len(header)-2))
@@ -89,14 +89,14 @@ func ShowMarketPerformance(s *Session) {
 	empty := true
 	for rows.Next() {
 		var symbol, quote string
-		var volume, avgPrice, returnPct, volatility float64
+		var volume, avgPrice, returnPct float64
 		var tradeCount, users int64
-		if err := rows.Scan(&symbol, &quote, &volume, &tradeCount, &avgPrice, &returnPct, &volatility, &users); err != nil {
+		if err := rows.Scan(&symbol, &quote, &volume, &tradeCount, &avgPrice, &returnPct, &users); err != nil {
 			fmt.Println("scan error:", err)
 			return
 		}
-		fmt.Printf("  %-6s  %-5s  %12.4f  %8d  %14.6f  %+12.2f  %14.6f  %8d\n",
-			symbol, quote, volume, tradeCount, avgPrice, returnPct, volatility, users)
+		fmt.Printf("  %-6s  %-5s  %12.4f  %8d  %14.6f  %+12.2f  %8d\n",
+			symbol, quote, volume, tradeCount, avgPrice, returnPct, users)
 		empty = false
 	}
 	if empty {

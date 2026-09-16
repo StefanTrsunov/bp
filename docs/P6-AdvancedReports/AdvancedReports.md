@@ -174,7 +174,7 @@ interest — over a chosen period?"* This is the "products that bring the most p
 "good locations" family of question from the phase brief, translated to markets instead of
 physical products: a market with heavy volume but a dead price, or a big price swing nobody
 actually traded, are both misleading on their own; this report puts volume, trade count,
-price return, volatility and user participation side by side so a market's performance over a
+price return and user participation side by side so a market's performance over a
 quarter/year/multi-year window can be judged as a whole, not from one number in isolation.
 Everything needed already exists: `market_trades` is the single source of truth for price and
 volume for every market ([PrototypeImplementation](../P4-Prototype/PrototypeImplementation.md#what-the-prototype-demonstrates-about-the-database-design)),
@@ -191,7 +191,6 @@ Given a period `[from, to)`, per market:
 - **Average trading price** = `AVG(price)` over the same trades.
 - **Market return %** = `(last trade price − first trade price) ÷ first trade price × 100`,
   ordering trades by `executed_at` inside the period.
-- **Price volatility** = the (sample) standard deviation of trade prices in the period.
 - **Participating users** = `COUNT(DISTINCT user_id)` from that market's **executed orders**
   in the period — the only correct source, since `market_trades` cannot answer this question
   at all.
@@ -210,7 +209,6 @@ RETURNS TABLE (
     trade_count          bigint,
     avg_price            numeric,
     market_return_pct    numeric,
-    price_volatility     numeric,
     participating_users  bigint
 )
 LANGUAGE sql STABLE AS $$
@@ -230,7 +228,6 @@ LANGUAGE sql STABLE AS $$
             SUM(quantity)    AS total_volume,
             COUNT(*)         AS trade_count,
             AVG(price)       AS avg_price,
-            STDDEV(price)    AS price_volatility,
             MAX(first_price) AS first_price,
             MAX(last_price)  AS last_price
         FROM trades
@@ -249,7 +246,6 @@ LANGUAGE sql STABLE AS $$
         ms.trade_count,
         ROUND(ms.avg_price, 6)                                                       AS avg_price,
         ROUND((ms.last_price - ms.first_price) / NULLIF(ms.first_price, 0) * 100, 2) AS market_return_pct,
-        ROUND(COALESCE(ms.price_volatility, 0), 6)                                   AS price_volatility,
         COALESCE(p.participating_users, 0)                                          AS participating_users
     FROM market_stats ms
     JOIN project.markets m ON m.id = ms.market_id
@@ -269,21 +265,24 @@ adds a BTC/USD uptrend and an ETH/USD downtrend across the same five quarters �
 file). Run through the CLI (`[11] Report: market performance`, `2025-01-01` to `2026-09-17`):
 
 ```
-  Symbol  Quote        Volume    Trades       Avg Price      Return %      Volatility     Users
-  ---------------------------------------------------------------------------------------------
-  DOGE    USD      29500.0000         3        0.120583         +2.95        0.001843         0
-  ADA     USD       2500.0000         3        0.450750         +1.62        0.003783         0
-  SOL     USD         23.5000         3      165.283333         +1.13        0.943840         0
-  ETH     USD         14.3500         8     3622.312500        -12.00      182.657992         2
-  BTC     USD          3.9750         9    59447.400000        +67.85    10563.413339         2
+  Symbol  Quote        Volume    Trades       Avg Price      Return %     Users
+  -----------------------------------------------------------------------------
+  DOGE    USD      29500.0000         3        0.120583         +2.95         0
+  ADA     USD       2500.0000         3        0.450750         +1.62         0
+  SOL     USD         23.5000         3      165.283333         +1.13         0
+  ETH     USD         14.3500         8     3622.312500        -12.00         2
+  BTC     USD          3.9750         9    59447.400000        +67.85         2
 ```
 
 BTC/USD and ETH/USD are the only two markets with historical (multi-quarter) data seeded, and
-they show it: BTC's price nearly tripled over the period (`+67.85%`) with by far the highest
-volatility, while ETH quietly lost `12%`. ADA/SOL/DOGE only have the few minutes of
-`data_load.sql`'s own recent seed trades, so their return/volatility numbers reflect that
-narrow window, and their `0` participating users is correct — `data_load.sql` seeds trade
-history for every market but only ever places an *order* on ETH.
+they show it: BTC's price nearly tripled over the period (`+67.85%`), while ETH quietly lost
+`12%`. ADA/SOL/DOGE only have the few minutes of `data_load.sql`'s own recent seed trades, so
+their return numbers reflect that narrow window, and their `0` participating users is correct
+— `data_load.sql` seeds trade history for every market but only ever places an *order* on ETH.
+
+A price-volatility column (standard deviation of trade price) was dropped from this report
+after review — with only a handful of trades per market in most periods it read as noise
+rather than signal, and total volume plus return already carry the useful information.
 
 ### Solution Relational Algebra
 
@@ -300,7 +299,7 @@ LastPx     = π_{market_id, price → last_price}
                               ∧ executed_at = t_last} Bounds)
 
 Stats      = γ_{market_id ; SUM(quantity) → total_volume, COUNT(*) → trade_count,
-                AVG(price) → avg_price, STDDEV(price) → price_volatility} (MT_period)
+                AVG(price) → avg_price} (MT_period)
 
 MarketStats = (Stats ⋈_{market_id} FirstPx) ⋈_{market_id} LastPx
 
@@ -313,7 +312,6 @@ Joined = ((MarketStats ⟕_{market_id} Participation)
 Result = τ_{total_volume ↓} (
            π_{symbol, quote_currency, total_volume, trade_count, avg_price,
               (last_price − first_price) / first_price × 100 → market_return_pct,
-              COALESCE(price_volatility, 0) → price_volatility,
               COALESCE(participating_users, 0) → participating_users}
              (Joined) )
 ```
@@ -337,4 +335,6 @@ model Claude Sonnet 5.
 P/L, ROI, consistency, market return, volatility and user participation — and asked the AI to
 turn them into working SQL, wire them into the prototype as real reports, build the
 relational-algebra equivalents, and produce demonstration data rich enough to show the
-reports doing something non-trivial.
+reports doing something non-trivial. In a follow-up, I asked for the price-volatility column
+to be dropped from the market performance report — see
+[AdvancedReportsAIUsage](AdvancedReportsAIUsage.md#follow-up--2026-09-17) for that change.
