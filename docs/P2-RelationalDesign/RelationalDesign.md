@@ -10,12 +10,20 @@ Notation: **bold** = primary key, *italic* = foreign key.
   - Candidate keys: `{id}`, `{symbol}`. `UNIQUE(symbol)`.
 - **Markets**(<u>**id**</u>, *crypto_id*, quote_currency, is_active, created_at)
   - Candidate keys: `{id}`, `{crypto_id, quote_currency}`. `UNIQUE(crypto_id, quote_currency)`.
-- **Holdings**(<u>**id**</u>, *user_id*, *crypto_id*, quantity, avg_price, created_at, updated_at)
+- **Holdings**(<u>**id**</u>, *user_id*, *crypto_id*, quantity, reserved_quantity, avg_price, created_at, updated_at)
   - Transformation of the M:N relationship `Holds`. Candidate keys: `{id}` and
     `{user_id, crypto_id}` — the latter is the relationship's own key and is
     enforced with `UNIQUE(user_id, crypto_id)`. `id` was chosen as PK for
     consistency with the other relations.
   - `avg_price` is `NOT NULL DEFAULT 0 CHECK (avg_price >= 0)`.
+  - `reserved_quantity` is `NOT NULL DEFAULT 0 CHECK (reserved_quantity >= 0
+    AND reserved_quantity <= quantity)` — the amount already committed to the
+    user's own open sell orders. `quantity - reserved_quantity` (the amount
+    actually free to sell) is not a stored column; it is computed wherever
+    needed, in `v_portfolio` as `available_quantity` and in the sell path of
+    [UseCase0005](../P3-UseCaseModel/UseCase0005.md). See
+    [ERModel](../P1-ConceptualModel/ERModel.md#holds--users-m--cryptos-n-partial-on-both-sides-with-attributes)
+    for why this mirrors `available_balance`/`invested_balance` on `Users`.
 - **Orders**(<u>**id**</u>, *user_id*, *market_id*, side, type, status, quantity, price, placed_at, executed_at)
   - `side ∈ {buy, sell}`, `type ∈ {market, limit}`, `status ∈ {open, executed, cancelled}`.
 - **Transactions**(<u>**id**</u>, *user_id*, type, amount, currency, *related_order*, created_at, description)
@@ -55,6 +63,16 @@ Notation: **bold** = primary key, *italic* = foreign key.
 
 ### Normalisation
 
+> **Validated in P5.** [Normalization](../P5-Normalization/Normalization.md) derives this
+> exact schema independently — starting only from a single de-normalized relation of every
+> model attribute and its functional dependencies, with no reference to the ER-to-relational
+> transformation below — and shows it decomposes to **BCNF**, one normal form stronger than
+> the 3NF claimed here. The two designs agree relation for relation and key for key, so
+> nothing here changed as a result; see that page's
+> [discussion](../P5-Normalization/Normalization.md#discussion) for what the one real
+> difference is (`avg_price`, a stored derived value, not a normalisation issue) and why this
+> design is still the one used from P5 onward.
+
 All relations are in **3NF**:
 
 - Every attribute is atomic (no repeating groups, no composite fields).
@@ -71,6 +89,26 @@ All relations are in **3NF**:
   P/L arithmetic of `v_portfolio`, and in SQL any arithmetic involving `NULL`
   yields `NULL`, so a nullable average would have silently blanked the
   unrealised-P/L column for an existing position instead of failing loudly.
+- `holdings.reserved_quantity`, unlike `avg_price`, is **not** derived — it is
+  written directly by the application (`trade.go`) as orders are placed and
+  settled, the same way `quantity` itself is. `quantity - reserved_quantity`
+  ("available") is the derived value here, and it is never stored, only
+  computed where it is needed.
+
+### Reservation and the order lifecycle
+
+`holdings.reserved_quantity` exists so that placing a sell order can be
+checked against what a user actually has *free* to sell
+(`quantity - reserved_quantity`), not against the raw `quantity`, which also
+counts crypto already promised to another order that has not settled yet.
+`CHECK (reserved_quantity >= 0 AND reserved_quantity <= quantity)` makes an
+inconsistent reservation impossible at the database level, regardless of what
+application code does. The exact statement sequence — lock the row, check the
+available amount, reserve, then settle — is in
+[UseCase0005](../P3-UseCaseModel/UseCase0005.md); the same
+`SELECT … FOR UPDATE` locking that already protected `users.available_balance`
+on the buy path is what makes two concurrent sell orders against the same
+holding serialize correctly instead of racing.
 
 ## DDL script
 
@@ -79,7 +117,7 @@ The script that creates the entire schema is [`../server/db/schema_creation.sql`
 The script creates:
 - 10 tables with check constraints, primary keys, foreign keys and unique constraints.
 - 5 performance indexes.
-- 2 views: `v_latest_prices` (latest trade price per market) and `v_portfolio` (per-user holdings valuation with unrealised P/L).
+- 2 views: `v_latest_prices` (latest trade price per market) and `v_portfolio` (per-user holdings valuation with unrealised P/L, plus `reserved_quantity` and the derived `available_quantity`).
 
 ## DML script (sample data)
 

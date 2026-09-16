@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"bp_project/server/db"
 )
@@ -12,6 +13,8 @@ func ShowPortfolio(s *Session) {
 	rows, err := db.DB.Query(
 		`SELECT symbol,
 		        quantity,
+		        COALESCE(reserved_quantity, 0),
+		        COALESCE(available_quantity, quantity),
 		        COALESCE(avg_price, 0),
 		        COALESCE(current_price, 0),
 		        COALESCE(market_value, 0),
@@ -27,22 +30,23 @@ func ShowPortfolio(s *Session) {
 	}
 	defer rows.Close()
 
+	header := fmt.Sprintf("  %-8s  %12s  %12s  %12s  %14s  %14s  %14s  %14s",
+		"Symbol", "Quantity", "Reserved", "Available", "Avg buy", "Current", "Value", "Unrealised P/L")
 	fmt.Println()
-	fmt.Printf("  %-8s  %12s  %14s  %14s  %14s  %14s\n",
-		"Symbol", "Quantity", "Avg buy", "Current", "Value", "Unrealised P/L")
-	fmt.Println("  ------------------------------------------------------------------------------------")
+	fmt.Println(header)
+	fmt.Println("  " + strings.Repeat("-", len(header)-2))
 
 	var totalValue, totalPnL float64
 	empty := true
 	for rows.Next() {
 		var sym string
-		var qty, avg, cur, val, pnl float64
-		if err := rows.Scan(&sym, &qty, &avg, &cur, &val, &pnl); err != nil {
+		var qty, reserved, avail, avg, cur, val, pnl float64
+		if err := rows.Scan(&sym, &qty, &reserved, &avail, &avg, &cur, &val, &pnl); err != nil {
 			fmt.Println("scan error:", err)
 			return
 		}
-		fmt.Printf("  %-8s  %12.4f  %14.6f  %14.6f  %14.4f  %+14.4f\n",
-			sym, qty, avg, cur, val, pnl)
+		fmt.Printf("  %-8s  %12.4f  %12.4f  %12.4f  %14.6f  %14.6f  %14.4f  %+14.4f\n",
+			sym, qty, reserved, avail, avg, cur, val, pnl)
 		totalValue += val
 		totalPnL += pnl
 		empty = false
@@ -51,9 +55,9 @@ func ShowPortfolio(s *Session) {
 		fmt.Println("  (no holdings yet)")
 		return
 	}
-	fmt.Println("  ------------------------------------------------------------------------------------")
-	fmt.Printf("  %-8s  %12s  %14s  %14s  %14.4f  %+14.4f\n",
-		"TOTAL", "", "", "", totalValue, totalPnL)
+	fmt.Println("  " + strings.Repeat("-", len(header)-2))
+	fmt.Printf("  %-8s  %12s  %12s  %12s  %14s  %14s  %14.4f  %+14.4f\n",
+		"TOTAL", "", "", "", "", "", totalValue, totalPnL)
 
 	// cash summary
 	var avail, invested float64

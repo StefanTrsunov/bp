@@ -16,6 +16,8 @@ A Trader inspects their current holdings, unrealised P/L, cash balance and recen
    ```sql
    SELECT symbol,
           quantity,
+          COALESCE(reserved_quantity,  0),
+          COALESCE(available_quantity, quantity),
           COALESCE(avg_price,      0),
           COALESCE(current_price,  0),
           COALESCE(market_value,   0),
@@ -25,6 +27,10 @@ A Trader inspects their current holdings, unrealised P/L, cash balance and recen
       AND quantity > 0
     ORDER BY symbol;
    ```
+
+   `reserved_quantity` is the amount committed to the Trader's own open sell
+   orders (see [UseCase0005](UseCase0005.md)); `available_quantity` is what is
+   actually free to sell right now.
 3. System displays the rows and a computed summary:
 
    ```sql
@@ -53,6 +59,8 @@ CREATE OR REPLACE VIEW project.v_portfolio AS
 SELECT h.user_id,
        c.symbol,
        h.quantity,
+       h.reserved_quantity,
+       (h.quantity - h.reserved_quantity)      AS available_quantity,
        h.avg_price,
        lp.price                                AS current_price,
        (h.quantity * lp.price)                 AS market_value,

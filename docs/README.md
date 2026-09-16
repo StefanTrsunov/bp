@@ -12,7 +12,7 @@ traders), and what kind of project it is.*
 
 ## Team members
 
-- *Your First Name Last Name — Index XXXXXX*
+- Stefan Trsunov 231285
 
 ## Course
 
@@ -40,6 +40,8 @@ that documents them.
 | `P2-RelationalDesign/`  | P2 | `RelationalDesign`, `RelationalDesignAIUsage` |
 | `P3-UseCaseModel/`      | P3 | `UseCaseModel`, `UseCase0001`–`UseCase0007`, `UseCaseModelAIUsage` |
 | `P4-Prototype/`         | P4 | `PrototypeImplementation`, `UseCase000XImplementation`, `BuildInstructions`, `PrototypeImplementationAIUsage` |
+| `P5-Normalization/`     | P5 | `Normalization`, `NormalizationAIUsage` |
+| `P6-AdvancedReports/`   | P6 | `AdvancedReports`, `AdvancedReportsAIUsage` |
 
 `Instructions.md` is the condensed course rubric — reference material, not a
 submission. `P0-ProjectDefinition/opis.md` and `P1-ConceptualModel/ep-diagram.md`
@@ -60,8 +62,8 @@ The two SQL scripts deliberately stay in `server/db/` rather than moving into
 | P2 | [RelationalDesign](P2-RelationalDesign/RelationalDesign.md) | Finished, awaiting approval |
 | P3 | [UseCaseModel](P3-UseCaseModel/UseCaseModel.md) | Finished, awaiting approval |
 | P4 | [PrototypeImplementation](P4-Prototype/PrototypeImplementation.md) | Finished, awaiting approval |
-| P5 | *Normalization* | Not started |
-| P6 | *Complex DB Reports* | Not started |
+| P5 | [Normalization](P5-Normalization/Normalization.md) | Finished, awaiting approval |
+| P6 | [AdvancedReports](P6-AdvancedReports/AdvancedReports.md) | Finished, awaiting approval |
 | P7 | *Advanced Database Development* | Not started |
 | P8 | *Advanced Application Development* | Not started |
 | P9 | *Other topics (Performance, Security)* | Not started |
@@ -76,13 +78,16 @@ required. P5 is the recommended next one.
 
 | File | Phase | What |
 |------|-------|------|
-| [`ERModel_v02.xml`](P1-ConceptualModel/ERModel_v02.xml) | P1 | TerraER source, current version |
-| [`ERModel_v02.png`](P1-ConceptualModel/ERModel_v02.png) | P1 | Exported diagram image, current version |
+| [`ERModel_v03.xml`](P1-ConceptualModel/ERModel_v03.xml) | P1 | TerraER source, current version |
+| [`ERModel_v03.png`](P1-ConceptualModel/ERModel_v03.png) | P1 | Exported diagram image, current version |
+| [`ERModel_v02.xml`](P1-ConceptualModel/ERModel_v02.xml) | P1 | TerraER source, previous version (kept per P1 rules) |
+| [`ERModel_v02.png`](P1-ConceptualModel/ERModel_v02.png) | P1 | Exported diagram image, previous version |
 | [`ERModel_v01.xml`](P1-ConceptualModel/ERModel_v01.xml) | P1 | TerraER source, first version (kept per P1 rules) |
 | [`ERModel_v01.png`](P1-ConceptualModel/ERModel_v01.png) | P1 | Exported diagram image, first version |
 | [`../server/db/schema_creation.sql`](../server/db/schema_creation.sql) | P2 | DDL — drops and recreates the `project` schema |
 | [`../server/db/data_load.sql`](../server/db/data_load.sql) | P2 | DML — truncates and reloads sample data |
 | [`relational_schema.jpg`](P2-RelationalDesign/relational_schema.jpg) | P2 | Crow's-foot diagram exported from DBeaver |
+| [`../server/db/reports_demo_data.sql`](../server/db/reports_demo_data.sql) | P6 | Optional multi-quarter demo data for the two reports (not part of `-init`) |
 
 ## Use cases (P3)
 

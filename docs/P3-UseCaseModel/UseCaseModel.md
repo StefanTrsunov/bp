@@ -37,7 +37,7 @@ trades and candles into the database so prices move without a connection to a re
    debits cash and upserts the holding at a running weighted-average price.
  * [https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0005.md UC0005] –
    '''Place market SELL order''' – Trader sells part or all of a holding at the current market
-   price, which credits cash and preserves the cost basis.
+   price, which reserves the crypto being sold, credits cash and preserves the cost basis.
  * [https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0006.md UC0006] –
    '''View portfolio and transaction history''' – Trader inspects current holdings, unrealised
    P/L, cash balances and the most recent ledger entries.
@@ -87,7 +87,7 @@ for the documented runs.
 ||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0002.md UC0002 – Log in]||High||Authenticates every Trader action; demonstrates `SELECT` with parameter binding.||
 ||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0003.md UC0003 – Deposit]||High||Shows a multi-row transaction: `UPDATE users` plus `INSERT INTO transactions`.||
 ||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0004.md UC0004 – Buy]||Very high||Core of the exchange: `INSERT orders`, `UPDATE users`, upsert `holdings`, ledger entry, market trade.||
-||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0005.md UC0005 – Sell]||Very high||Dual of Buy; demonstrates row-level `FOR UPDATE` locking and cost-basis bookkeeping.||
+||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0005.md UC0005 – Sell]||Very high||Dual of Buy; demonstrates row-level `FOR UPDATE` locking, reservation of committed crypto (`holdings.reserved_quantity`) and cost-basis bookkeeping.||
 ||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0006.md UC0006 – Portfolio]||High||Demonstrates joins over `holdings`, `markets` and `crypto`, and the `v_portfolio` view.||
 ||[https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCase0007.md UC0007 – Watchlist]||Medium||Demonstrates N–M relation handling and `ON CONFLICT` upsert semantics.||
 
@@ -103,11 +103,16 @@ AI was used in this phase and is logged in full, per the course rule for P1 onwa
    – the same conversation produced the P1–P4 artefacts, so the complete prompt/response log is
    kept in one place. Direct links:
    [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-1--2026-04-21 Session 1 – 2026-04-21],
-   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-2--2026-08-06--2026-08-07 Session 2 – 2026-08-06/07].
+   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-2--2026-08-06--2026-08-07 Session 2 – 2026-08-06/07],
+   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-3--2026-09-16 Session 3 – 2026-09-16].
 
 '''Service:''' Claude Code (Anthropic), https://claude.com/claude-code – Claude subscription,
-model Claude Opus 4.7 (1M context).
+model Claude Opus 4.7 (1M context) in sessions 1–2, Claude Sonnet 5 in session 3.
 
 '''In short:''' the AI proposed the actor taxonomy and drafted the seven use cases with their SQL
 in session 1. In session 2 the use-case model itself was '''not''' changed – the only work was
 re-executing every scenario, including the failure paths, against a live PostgreSQL 16 database.
+In session 3, UC0004 and UC0005 were revised to reserve the resource an order commits (crypto on
+a sell) before settling it, closing a gap where nothing stopped a second sell order from being
+granted crypto already promised to a first one; see
+[UseCaseModelAIUsage](UseCaseModelAIUsage.md#session-3--2026-09-16).

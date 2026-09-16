@@ -54,3 +54,41 @@ executing the corresponding prototype flows against a live PostgreSQL 16
 database, including the failure paths (insufficient funds, insufficient holding,
 duplicate registration, wrong password). The results are documented per use case
 on the `UseCaseXXXXImplementation` pages.
+
+### Session 3 — 2026-09-16
+
+Driven by the design review logged in full in
+[ERModelAIUsage](../P1-ConceptualModel/ERModelAIUsage.md#session-3--2026-09-16):
+placing a sell order checked `holdings.quantity` directly, with no way to
+record that part of a position was already promised to another, unsettled
+order.
+
+**What changed:**
+
+- [UseCase0005](UseCase0005.md) — the scenario now reserves the crypto
+  (`holdings.reserved_quantity`) before removing it from the position, checks
+  `quantity - reserved_quantity` rather than raw `quantity`, and adds a
+  worked example and a note on why the reserve and settle steps stay inside
+  one transaction rather than two (only market orders are implemented, and
+  splitting into two commits would risk an order stuck `open` with no cancel
+  use case to recover it).
+- [UseCase0004](UseCase0004.md) — no change to the balance logic, but the
+  order insert now goes through `status='open'` before a final
+  `UPDATE ... SET status='executed'`, matching the sell side, so `Orders`
+  genuinely has the lifecycle [ERModel](../P1-ConceptualModel/ERModel.md)
+  describes for it rather than a status column that is only ever written
+  once.
+- [UseCase0006](UseCase0006.md) — the `v_portfolio` reference and its query
+  gained `reserved_quantity`/`available_quantity`, since the portfolio screen
+  is where a Trader would actually see the new field.
+- The use-case importance table and UC0005's one-line description in
+  [UseCaseModel](UseCaseModel.md) were reworded to mention the reservation.
+
+Every changed scenario's SQL was re-run against the live database, including a
+two-concurrent-sells test that reproduces the exact bug being fixed: see
+[UseCase0005Implementation](../P4-Prototype/UseCase0005Implementation.md).
+
+**What I decided:** to keep this a revision of the existing UC0004/UC0005
+pages rather than a new use case (e.g. "cancel order") — `cancelled` remains
+an unused status, same as before, since nothing in the prototype produces it
+and inventing a cancel flow was not what the review asked for.

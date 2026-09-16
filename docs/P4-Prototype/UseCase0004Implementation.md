@@ -26,17 +26,20 @@
    ```sql
    BEGIN;
 
-   -- (a) record the order
+   -- (a) record the order as 'open' — no trade has happened yet
    INSERT INTO orders
-       (user_id, market_id, side, type, status, quantity, price, executed_at)
+       (user_id, market_id, side, type, status, quantity, price)
    VALUES
-       ($1, $2, 'buy', 'market', 'executed', $3, $4, now())
+       ($1, $2, 'buy', 'market', 'open', $3, $4)
    RETURNING id;
 
    -- (b) lock and check the user balance
    SELECT available_balance FROM users WHERE id = $1 FOR UPDATE;
 
-   -- (c) move cash from available to invested
+   -- (c) move cash from available to invested. A buy never reserves crypto
+   --     the way a sell does (see UC0005) — it only ever adds to the
+   --     position, so there is nothing to commit on the holdings side
+   --     before settling.
    UPDATE users
       SET available_balance = available_balance - $notional,
           invested_balance  = invested_balance  + $notional,
@@ -46,6 +49,7 @@
    -- (d) upsert the holding, recomputing the weighted-average entry price
    --     in one statement. Every SET expression sees the pre-update row, so
    --     holdings.quantity below is still the old quantity.
+   --     reserved_quantity is untouched by a buy and defaults to 0.
    INSERT INTO holdings (user_id, crypto_id, quantity, avg_price, updated_at)
    VALUES ($1, $c, $3, $4, now())
    ON CONFLICT (user_id, crypto_id) DO UPDATE
@@ -67,6 +71,9 @@
    VALUES
        ($2, now(), $4, $3, 'buy', 'user');
 
+   -- (g) settle the order itself — it has now actually been filled
+   UPDATE orders SET status = 'executed', executed_at = now() WHERE id = $orderId;
+
    COMMIT;
    ```
 
@@ -76,15 +83,15 @@
 
 ## Verified run (from actual prototype execution)
 
-With seed data loaded:
+Re-run 2026-09-16 against PostgreSQL 16 (`bp_database` on `localhost:5433`) with freshly loaded seed data:
 
-- **Before:** alice.available_balance = 8250.00, portfolio = { ETH: 0.5 }.
+- **Before:** alice.available_balance = 8250.00, portfolio = { ETH: 0.5000, reserved 0.0000 }.
 - **Command:** `buy 0.01 BTC`.
-- **After:** alice.available_balance = 7578.60 (= 8250 − 671.40), portfolio = { BTC: 0.01 @ 67140, ETH: 0.5 @ 3500 }, net worth = 10010.00 USD (the +10 is the ETH unrealised P/L from the price moving from 3500 → 3520).
+- **After:** alice.available_balance = 7578.60 (= 8250 − 671.40), portfolio = { BTC: 0.0100 @ 67140 (reserved 0.0000), ETH: 0.5000 @ 3500 (reserved 0.0000) }, net worth = 10010.00 USD (the +10 is the ETH unrealised P/L from the price moving from 3500 → 3520). A buy never sets `reserved_quantity`, so it reads 0 on every row here.
 
 ## Failure path — insufficient funds
 
-If `available_balance < notional`, the `defer tx.Rollback()` in `server/trade.go` reverts all six statements and the user sees:
+If `available_balance < notional`, the `defer tx.Rollback()` in `server/trade.go` reverts every statement above and the user sees:
 
 ```
 Insufficient funds: need X, have Y

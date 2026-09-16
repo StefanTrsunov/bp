@@ -11,6 +11,8 @@
 
    ```sql
    SELECT symbol, quantity,
+          COALESCE(reserved_quantity,  0),
+          COALESCE(available_quantity, quantity),
           COALESCE(avg_price,      0),
           COALESCE(current_price,  0),
           COALESCE(market_value,   0),
@@ -29,19 +31,25 @@
 
 ### Verified run
 
-With the seed data (`data_load.sql`), immediately after login, alice's portfolio prints:
+Re-run 2026-09-16 against PostgreSQL 16 with the seed data (`data_load.sql`).
+Immediately after login, alice's portfolio prints (now with the
+`Reserved`/`Available` columns from `holdings.reserved_quantity`):
 
 ```
-  Symbol        Quantity         Avg buy         Current           Value  Unrealised P/L
-  ------------------------------------------------------------------------------------
-  ETH             0.5000     3500.000000     3520.000000       1760.0000        +10.0000
-  ------------------------------------------------------------------------------------
-  TOTAL                                                        1760.0000        +10.0000
+  Symbol        Quantity      Reserved     Available         Avg buy         Current           Value  Unrealised P/L
+  ------------------------------------------------------------------------------------------------------------------
+  ETH             0.5000        0.0000        0.5000     3500.000000     3520.000000       1760.0000        +10.0000
+  ------------------------------------------------------------------------------------------------------------------
+  TOTAL                                                                                    1760.0000        +10.0000
 
   Cash available : 8250.0000 USD
   Portfolio value: 1760.0000 USD
   Net worth      : 10010.0000 USD
 ```
+
+`Reserved` is 0.0000 here because nothing is mid-sell; see
+[UseCase0005Implementation](UseCase0005Implementation.md) for a portfolio
+snapshot taken with crypto actually reserved.
 
 ### Transaction history
 

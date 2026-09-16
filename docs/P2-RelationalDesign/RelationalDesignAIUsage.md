@@ -68,3 +68,34 @@ Both scripts were re-run end to end against PostgreSQL 16 after these changes.
 > **Still outstanding:** `relational_schema.jpg` must be exported from DBeaver
 > against the faculty database. No AI involvement is possible there — it needs a
 > live connection to your assigned database.
+
+### Session 3 — 2026-09-16
+
+Driven by the same design review logged in full in
+[ERModelAIUsage](../P1-ConceptualModel/ERModelAIUsage.md#session-3--2026-09-16):
+a sell order had nothing to check `holdings.quantity` against except itself,
+so nothing stopped two sell orders from being granted the same units.
+
+Changes to the P2 artefacts:
+
+- `holdings` gained `reserved_quantity numeric(20,4) NOT NULL DEFAULT 0
+  CHECK (reserved_quantity >= 0 AND reserved_quantity <= quantity)` in
+  `schema_creation.sql`.
+- `v_portfolio` gained `reserved_quantity` and the derived
+  `available_quantity = quantity - reserved_quantity`.
+- [RelationalDesign](RelationalDesign.md) gained a "Reservation and the order
+  lifecycle" section explaining why the check is enforced at the database
+  level rather than trusted to application code, and why it does not conflict
+  with the existing `SELECT … FOR UPDATE` locking on the sell path.
+- `data_load.sql` needed no change — `reserved_quantity` defaults to 0, which
+  is correct for every seeded holding.
+
+Re-run end to end against the live database on `localhost:5433`
+(`-init` then `-load-data`), and against a manually seeded 2 BTC holding to
+reproduce the exact scenario that motivated the change — see
+[UseCase0005Implementation](../P4-Prototype/UseCase0005Implementation.md) for
+the transcript.
+
+**What I decided:** to add the `CHECK` constraint rather than rely on
+`trade.go` alone to keep the reservation consistent — the same reasoning
+already applied to `avg_price NOT NULL` in session 2.

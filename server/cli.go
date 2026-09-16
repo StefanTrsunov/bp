@@ -75,6 +75,8 @@ func authenticatedMenu(s *Session) {
 	fmt.Println("[7] View transaction history")
 	fmt.Println("[8] Manage watchlist")
 	fmt.Println("[9] Logout")
+	fmt.Println("[10] Report: top traders")
+	fmt.Println("[11] Report: market performance")
 	fmt.Println("[0] Exit")
 	switch prompt("> ") {
 	case "1":
@@ -93,6 +95,10 @@ func authenticatedMenu(s *Session) {
 		ShowTransactions(s)
 	case "8":
 		ManageWatchlist(s)
+	case "10":
+		ShowTopTraders(s)
+	case "11":
+		ShowMarketPerformance(s)
 	case "9":
 		s.UserID = ""
 		s.Username = ""

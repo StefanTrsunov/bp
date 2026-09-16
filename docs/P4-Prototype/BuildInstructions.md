@@ -105,6 +105,23 @@ The bot walks the price of every active market, inserts a row into
 the CLI change while it runs, because the current price is always read from the
 most recent trade (`v_latest_prices`), never from a stored column.
 
+### 7. Optional — richer data for the P6 reports
+
+`data_load.sql` only seeds a few minutes of trade history, which is not enough
+for the [top traders](../P6-AdvancedReports/AdvancedReports.md#top-traders-by-realized-performance)
+or [market performance](../P6-AdvancedReports/AdvancedReports.md#market-performance-leaderboard)
+reports (menu `[10]`/`[11]`) to show more than a single period. To see them do
+something more interesting, load five quarters of synthetic history on top:
+
+```sh
+psql "postgresql://$DBUSER:$DBPASSWORD@$DBHOST:$DBPORT/$DBNAME" \
+  -f server/db/reports_demo_data.sql
+```
+
+It is deliberately not part of `-init`/`-load-data` — see the header of
+[`reports_demo_data.sql`](../../server/db/reports_demo_data.sql) for why — so
+running it never changes the balances the smoke test below checks.
+
 ## Testing instructions
 
 ### Mini-guide to the application
@@ -113,7 +130,8 @@ The CLI has two menus. Before logging in: **Register**, **Login**,
 **Browse markets**. After logging in: **View balance**, **Deposit virtual
 funds**, **Browse markets**, **Place market BUY order**, **Place market SELL
 order**, **View portfolio**, **View transaction history**, **Manage watchlist**,
-**Logout**.
+**Logout**, and two [P6](../P6-AdvancedReports/AdvancedReports.md) reports:
+**Report: top traders** and **Report: market performance**.
 
 You never have to remember an identifier. Markets are always printed as a
 numbered list with their current price before you are asked which one you want,
@@ -121,14 +139,14 @@ and assets are referred to by symbol (`BTC`, `ETH`, …), never by database id.
 
 ### End-to-end smoke test
 
-Verified on 2026-08-07 against PostgreSQL 16 with freshly loaded sample data.
+Verified on 2026-09-16 against PostgreSQL 16 with freshly loaded sample data.
 Expected values are exact.
 
 1. `./eduberza -init` — prints `Database initialised.`
 2. `./eduberza`, then `[2] Login` → `alice` / `test123` → `Login successful.`
-3. `[6] View portfolio` → one row: `ETH 0.5000` at avg 3500.000000, current
-   3520.000000, value 1760.0000, unrealised P/L `+10.0000`. Cash available
-   8250.0000, net worth 10010.0000.
+3. `[6] View portfolio` → one row: `ETH 0.5000` reserved 0.0000, available
+   0.5000, at avg 3500.000000, current 3520.000000, value 1760.0000,
+   unrealised P/L `+10.0000`. Cash available 8250.0000, net worth 10010.0000.
 4. `[4] Place market BUY order` → `BTC` → `0.01` →
    `Order executed: buy 0.0100 BTC @ 67140.000000 (notional 671.4000 USD)`.
 5. `[6] View portfolio` → now BTC *and* ETH, total value 2431.4000, cash
@@ -149,7 +167,16 @@ transactions actually roll back:
   Expect `Insufficient funds: need 67140.0000, have 2500.0000` and *no* change
   to any table — no order row, no ledger entry, no holding.
 - **Insufficient holding:** as `bob` (no positions), try to sell `1` ETH.
-  Expect `Insufficient holding: trying to sell 1.0000, hold 0.0000`.
+  Expect `Insufficient holding: trying to sell 1.0000, available 0.0000 (of
+  0.0000 held, 0.0000 reserved)`.
+- **Two sell orders racing for the same crypto:** give `alice` a 2 BTC holding
+  and start two `eduberza` processes at once, each selling `1.5` BTC (together
+  3 BTC, more than she has). Expect exactly one `Order executed`, and the
+  other `Insufficient holding` reading the post-commit quantity — see
+  [UseCase0005Implementation](UseCase0005Implementation.md) for the exact
+  transcript. This is the concurrency guarantee that
+  `holdings.reserved_quantity` and the `SELECT ... FOR UPDATE` lock together
+  provide.
 - **Duplicate registration:** register with username `alice`. Expect
   `Username or email already taken.`
 - **Wrong password:** log in as `alice` with any wrong password. Expect

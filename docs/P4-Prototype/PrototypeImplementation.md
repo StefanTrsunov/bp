@@ -45,7 +45,15 @@ alongside the pages, in
  * '''Constraints do real work.''' `UNIQUE (user_id, crypto_id)` on `holdings` is what makes the
    `INSERT … ON CONFLICT DO UPDATE` upsert possible, so the weighted-average entry price is
    recomputed by the database in one statement instead of by a read-modify-write in application
-   code.
+   code. `CHECK (reserved_quantity >= 0 AND reserved_quantity <= quantity)` is the same idea
+   applied to the sell path: an inconsistent reservation is impossible at the database level, not
+   just something `trade.go` is careful about.
+ * '''Selling reserves before it removes.''' A sell order locks the holding row, reserves the
+   quantity being sold, then settles by removing it — see
+   [UseCase0005Implementation](UseCase0005Implementation.md). Two sell orders placed at the same
+   instant for more than the available quantity are serialised correctly by `SELECT ... FOR
+   UPDATE`, not just by luck of everything happening in one CLI process; this is demonstrated
+   there with two concurrent processes.
  * '''No identifiers are ever typed.''' Markets are listed with their prices before any choice is
    made, and everything else is selected by symbol.
 
@@ -62,26 +70,11 @@ Deliberately out of scope for a first prototype, and the natural content of the 
    would need a decimal type for real use.
  * There is no connection pooling configuration and no explicit isolation level; both are P8
    topics.
-== AI usage ==
-
-AI was used in this phase and is logged in full, per the course rule for P1 onward.
-
- * '''Phase log:'''
-   [https://github.com/StefanTrsunov/bp/blob/main/docs/P3-UseCaseModel/UseCaseModelAIUsage.md UseCaseModelAIUsage.md]
-   – service used, what the AI produced, and what I decided myself.
- * '''Full conversation transcript:'''
-   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md ERModelAIUsage.md]
-   – the same conversation produced the P1–P4 artefacts, so the complete prompt/response log is
-   kept in one place. Direct links:
-   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-1--2026-04-21 Session 1 – 2026-04-21],
-   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-2--2026-08-06--2026-08-07 Session 2 – 2026-08-06/07].
-
-'''Service:''' Claude Code (Anthropic), https://claude.com/claude-code – Claude subscription,
-model Claude Opus 4.7 (1M context).
-
-'''In short:''' the AI proposed the actor taxonomy and drafted the seven use cases with their SQL
-in session 1. In session 2 the use-case model itself was '''not''' changed – the only work was
-re-executing every scenario, including the failure paths, against a live PostgreSQL 16 database.
+ * Reservation only ever lives inside one transaction, because only market orders (which settle
+   immediately) exist. A real limit-order matcher would leave `holdings.reserved_quantity` set
+   and `orders.status = 'open'` between two separate commits, and would need a way to cancel an
+   order to release the reservation — neither is implemented, since nothing in the prototype
+   produces an order that stays open.
 
 == AI usage ==
 
@@ -95,14 +88,18 @@ AI was used in this phase and is logged in full, per the course rule for P1 onwa
    – the same conversation produced the P1–P4 artefacts, so the complete prompt/response log is
    kept in one place. Direct links:
    [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-1--2026-04-21 Session 1 – 2026-04-21],
-   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-2--2026-08-06--2026-08-07 Session 2 – 2026-08-06/07].
+   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-2--2026-08-06--2026-08-07 Session 2 – 2026-08-06/07],
+   [https://github.com/StefanTrsunov/bp/blob/main/docs/P1-ConceptualModel/ERModelAIUsage.md#session-3--2026-09-16 Session 3 – 2026-09-16].
 
 '''Service:''' Claude Code (Anthropic), https://claude.com/claude-code – Claude subscription,
-model Claude Opus 4.7 (1M context).
+model Claude Opus 4.7 (1M context) in sessions 1–2, Claude Sonnet 5 in session 3.
 
 '''In short:''' session 1 rewrote the existing Chi/HTTP backend as the CLI prototype covering
 UC0001–UC0007 and added the market bot. Session 2 was a review pass I asked for, which found and
 fixed three bugs – a path-resolution bug that made the documented build instructions fail, an
 infinite loop at end of input, and an error check in the wrong order that misreported database
 failures as "Insufficient holding" – and replaced the read-modify-write holding update with a
-single `INSERT … ON CONFLICT DO UPDATE`.
+single `INSERT … ON CONFLICT DO UPDATE`. Session 3 added `holdings.reserved_quantity` and changed
+`trade.go`'s sell path to reserve crypto before removing it, closing a gap where two sell orders
+could be granted the same units; see
+[PrototypeImplementationAIUsage](PrototypeImplementationAIUsage.md#session-3--2026-09-16).
