@@ -4,7 +4,7 @@ This phase deliberately ignores the design from [ERModel](../P1-ConceptualModel/
 (P1) and [RelationalDesign](../P2-RelationalDesign/RelationalDesign.md) (P2) as a starting
 point. Instead it starts over from a single flat relation containing every attribute of the
 model, derives the functional dependencies that hold on it, and decomposes it formally,
-step by step, using only Armstrong's axioms and the standard normal-form definitions. The
+step by step. The
 [final section](#final-result-and-discussion) compares what falls out of that process with
 the P2 design.
 
