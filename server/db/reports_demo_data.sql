@@ -27,7 +27,20 @@
 -- Idempotent: deletes its own previously-inserted rows (tagged via
 -- description/source) before re-inserting.
 
+-- P7: users' cash (available + reserved) must equal their ledger at
+-- COMMIT, so the balance moves by exactly what this script removes and
+-- re-adds to the ledger, all in one transaction. The historical orders are
+-- imported as completely filled.
+
+BEGIN;
+
 SET search_path TO project, public;
+
+UPDATE users u
+   SET available_balance = u.available_balance - d.total
+  FROM (SELECT user_id, SUM(amount) AS total FROM transactions
+         WHERE description = 'P6 demo data' GROUP BY user_id) d
+ WHERE u.id = d.user_id;
 
 DELETE FROM transactions  WHERE description = 'P6 demo data';
 DELETE FROM orders        WHERE id IN (
@@ -97,19 +110,27 @@ INSERT INTO market_trades (market_id, executed_at, price, quantity, side, source
 -- ============================================================================
 -- Executed orders: who participated in which market, across the same quarters.
 -- ============================================================================
-INSERT INTO orders (id, user_id, market_id, side, type, status, quantity, price, placed_at, executed_at) VALUES
+INSERT INTO orders (id, user_id, market_id, side, type, status, quantity, filled_quantity, price, placed_at, executed_at) VALUES
     ('e1111111-1111-1111-1111-111111111111', 'b1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-111111111111', 'buy', 'market', 'executed', 0.5000, 40000.000000,
+     'a1111111-1111-1111-1111-111111111111', 'buy', 'market', 'executed', 0.5000, 0.5000, 40000.000000,
      '2025-07-15 10:00', '2025-07-15 10:00'),
     ('e2222222-2222-2222-2222-222222222222', 'b1111111-1111-1111-1111-111111111111',
-     'a2222222-2222-2222-2222-222222222222', 'sell', 'market', 'executed', 3.0000, 4000.000000,
+     'a2222222-2222-2222-2222-222222222222', 'sell', 'market', 'executed', 3.0000, 3.0000, 4000.000000,
      '2025-10-15 10:00', '2025-10-15 10:00'),
     ('e3333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222',
-     'a1111111-1111-1111-1111-111111111111', 'buy', 'market', 'executed', 1.2000, 55000.000000,
+     'a1111111-1111-1111-1111-111111111111', 'buy', 'market', 'executed', 1.2000, 1.2000, 55000.000000,
      '2026-01-15 10:00', '2026-01-15 10:00'),
     ('e4444444-4444-4444-4444-444444444444', 'b2222222-2222-2222-2222-222222222222',
-     'a1111111-1111-1111-1111-111111111111', 'buy', 'market', 'executed', 1.0000, 60000.000000,
+     'a1111111-1111-1111-1111-111111111111', 'buy', 'market', 'executed', 1.0000, 1.0000, 60000.000000,
      '2026-04-15 10:00', '2026-04-15 10:00'),
     ('e5555555-5555-5555-5555-555555555555', 'b3333333-3333-3333-3333-333333333333',
-     'a2222222-2222-2222-2222-222222222222', 'sell', 'market', 'executed', 2.0000, 3600.000000,
+     'a2222222-2222-2222-2222-222222222222', 'sell', 'market', 'executed', 2.0000, 2.0000, 3600.000000,
      '2026-01-15 10:00', '2026-01-15 10:00');
+
+UPDATE users u
+   SET available_balance = u.available_balance + d.total
+  FROM (SELECT user_id, SUM(amount) AS total FROM transactions
+         WHERE description = 'P6 demo data' GROUP BY user_id) d
+ WHERE u.id = d.user_id;
+
+COMMIT;

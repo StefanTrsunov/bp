@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 var DB *sql.DB
@@ -18,7 +18,7 @@ var DB *sql.DB
 // The SQL scripts are compiled into the binary so that -init works no matter
 // which directory the program is started from.
 //
-//go:embed schema_creation.sql data_load.sql
+//go:embed schema_creation.sql advanced_db.sql data_load.sql
 var sqlScripts embed.FS
 
 func Connect() error {
@@ -35,10 +35,26 @@ func Connect() error {
 		host, port, user, pass, name,
 	)
 
-	var err error
-	DB, err = sql.Open("postgres", dsn)
-	if err != nil {
-		return fmt.Errorf("sql.Open: %w", err)
+	// Optional SSH tunnel, the same thing DBeaver's "SSH" tab does. When
+	// SSH_HOST is set, DBHOST/DBPORT are resolved from the SSH server's side
+	// (for the faculty server that is usually localhost:5432).
+	if sshHost := os.Getenv("SSH_HOST"); sshHost != "" {
+		dialer, err := newSSHDialer(sshHost)
+		if err != nil {
+			return err
+		}
+		connector, err := pq.NewConnector(dsn)
+		if err != nil {
+			return fmt.Errorf("pq.NewConnector: %w", err)
+		}
+		connector.Dialer(dialer)
+		DB = sql.OpenDB(connector)
+	} else {
+		var err error
+		DB, err = sql.Open("postgres", dsn)
+		if err != nil {
+			return fmt.Errorf("sql.Open: %w", err)
+		}
 	}
 	if err := DB.Ping(); err != nil {
 		return fmt.Errorf("db ping (host=%s port=%s user=%s dbname=%s): %w",
@@ -71,12 +87,14 @@ func RunSQLFile(path string) error {
 	return nil
 }
 
-// InitSchema runs schema_creation.sql then data_load.sql.
+// InitSchema runs schema_creation.sql, advanced_db.sql (P7) and data_load.sql.
 // Destructive: drops the `project` schema. Intended for the -init flag.
 func InitSchema() error {
-	log.Println("Running schema_creation.sql ...")
-	if err := runScript("schema_creation.sql"); err != nil {
-		return err
+	for _, name := range []string{"schema_creation.sql", "advanced_db.sql"} {
+		log.Printf("Running %s ...", name)
+		if err := runScript(name); err != nil {
+			return err
+		}
 	}
 	if err := LoadData(); err != nil {
 		return err

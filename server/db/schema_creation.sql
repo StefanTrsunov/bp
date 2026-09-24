@@ -25,6 +25,9 @@ CREATE TABLE project.users (
     password_hash     varchar(255)    NOT NULL,
     available_balance numeric(18,4)   NOT NULL DEFAULT 0 CHECK (available_balance >= 0),
     invested_balance  numeric(18,4)   NOT NULL DEFAULT 0 CHECK (invested_balance  >= 0),
+    -- P7: cash committed to the user's active buy orders, moved out of
+    -- available_balance when the order is placed and consumed as it fills.
+    reserved_balance  numeric(18,4)   NOT NULL DEFAULT 0 CHECK (reserved_balance  >= 0),
     created_at        timestamptz     NOT NULL DEFAULT now(),
     updated_at        timestamptz
 );
@@ -85,8 +88,12 @@ CREATE TABLE project.orders (
     market_id   uuid           NOT NULL REFERENCES project.markets(id),
     side        varchar(4)     NOT NULL CHECK (side   IN ('buy', 'sell')),
     type        varchar(20)    NOT NULL CHECK (type   IN ('market', 'limit')),
-    status      varchar(20)    NOT NULL CHECK (status IN ('open', 'executed', 'cancelled')),
+    status      varchar(20)    NOT NULL CHECK (status IN ('open', 'partially_filled', 'executed', 'cancelled')),
     quantity    numeric(20,4)  NOT NULL CHECK (quantity > 0),
+    -- P7: how much of the order has been traded so far; remaining is
+    -- quantity - filled_quantity. Maintained from market_trades.
+    filled_quantity numeric(20,4) NOT NULL DEFAULT 0
+                               CHECK (filled_quantity >= 0 AND filled_quantity <= quantity),
     price       numeric(18,6),
     placed_at   timestamptz    NOT NULL DEFAULT now(),
     executed_at timestamptz
@@ -124,10 +131,16 @@ CREATE TABLE project.market_trades (
     price       numeric(18,6)  NOT NULL CHECK (price    > 0),
     quantity    numeric(20,6)  NOT NULL CHECK (quantity > 0),
     side        varchar(4)     CHECK (side IN ('buy', 'sell')),
-    source      varchar(50)    NOT NULL DEFAULT 'simulation'
+    source      varchar(50)    NOT NULL DEFAULT 'simulation',
+    -- P7: the orders this trade filled. NULL on a side means the counterparty
+    -- was the simulated market (bot ticks have both NULL).
+    buy_order_id  uuid         REFERENCES project.orders(id),
+    sell_order_id uuid         REFERENCES project.orders(id)
 );
 
 CREATE INDEX idx_market_trades_market_time ON project.market_trades(market_id, executed_at DESC);
+CREATE INDEX idx_market_trades_buy_order  ON project.market_trades(buy_order_id)  WHERE buy_order_id  IS NOT NULL;
+CREATE INDEX idx_market_trades_sell_order ON project.market_trades(sell_order_id) WHERE sell_order_id IS NOT NULL;
 
 -- ============================================================================
 -- MARKET CANDLES

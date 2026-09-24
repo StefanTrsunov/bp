@@ -1,8 +1,8 @@
-# Entity-Relationship Model v.03
+# Entity-Relationship Model v.04
 
 ## Diagram
 
-![ERModel_v03](ERModel_v03.png)
+![ERModel_v04](ERModel_v04.png)
 
 Notation: Chen. Rectangles are entity sets, diamonds are relationships, ellipses
 are attributes, underlined ellipses are primary keys, the dashed ellipse is a
@@ -50,6 +50,7 @@ propagate changes across the whole database.
 | `password_hash` | text(255) | required — never the password itself; the prototype stores a SHA-256 hex digest |
 | `available_balance` | numeric(18,4) | required, default 0, ≥ 0 |
 | `invested_balance` | numeric(18,4) | required, default 0, ≥ 0 |
+| `reserved_balance` | numeric(18,4) | required, default 0, ≥ 0 — cash set aside for the user's open buy orders (added in v04, after P7) |
 | `created_at` | timestamptz | required, defaults to now |
 | `updated_at` | timestamptz | optional (null until first change) |
 
@@ -95,16 +96,17 @@ because an order is a record of *intent* that outlives its execution: it keeps
 the requested quantity and price even after it has been filled, which is what
 makes the ledger auditable.
 
-Placing an order is what triggers a **reservation** of whatever it commits —
-the crypto being sold (`Holds.reserved_quantity`, below) on a sell, cash
-already handled the same way on a buy via `available_balance` /
-`invested_balance`. `status` therefore has real meaning as a lifecycle, not
-just a label: `open` means reserved but not yet settled, `executed` means
-settled, `cancelled` would release the reservation without settling (not yet
-exercised by any use case, since only market orders — which settle
-immediately — are implemented). See
+Placing an order is what triggers a **reservation** of whatever it commits:
+the crypto being sold (`Holds.reserved_quantity`, below) on a sell, and the
+cash (`Users.reserved_balance`) on a buy. Since v04 (after P7) an order can
+wait in the order book and be filled in parts, so `status` is a real
+lifecycle driven by `filled_quantity`: `open` (nothing filled yet),
+`partially_filled`, `executed` (completely filled), or `cancelled`, which
+releases what is still reserved. See
 [UseCase0005](../P3-UseCaseModel/UseCase0005.md) for the reserve-then-settle
-sequence.
+sequence and
+[AdvancedDatabaseDevelopment](../P7-AdvancedDatabaseDevelopment/AdvancedDatabaseDevelopment.md)
+for the rules that keep it consistent.
 
 **Keys:** candidate `{id}` only — there is no natural key, since the same user
 can place two identical orders on the same market in the same second, and both
@@ -114,10 +116,11 @@ are legitimately distinct; primary key **`id`**.
 |---|---|---|
 | `id` | UUID | PK, required |
 | `side` | text | required, `buy` or `sell` |
-| `type` | text | required, `market` or `limit` — the prototype executes only `market`; `limit` exists so the model does not have to change when limit orders are implemented |
-| `status` | text | required, `open`, `executed` or `cancelled` |
+| `type` | text | required, `market` or `limit` (both executed since P7) |
+| `status` | text | required, `open`, `partially_filled`, `executed` or `cancelled` |
 | `quantity` | numeric(20,4) | required, > 0 |
-| `price` | numeric(18,6) | optional — null until the order settles, then the fill price |
+| `filled_quantity` | numeric(20,4) | required, default 0, between 0 and `quantity` — how much has been traded; remaining = `quantity − filled_quantity` (added in v04, after P7) |
+| `price` | numeric(18,6) | the limit price; for a market order, the market price when it was placed |
 | `placed_at` | timestamptz | required, defaults to now |
 | `executed_at` | timestamptz | optional, set when the order settles |
 
@@ -158,6 +161,27 @@ in timestamp order, never referenced by anything else).
 | `quantity` | numeric(20,6) | required, > 0 |
 | `side` | text | optional, `buy` or `sell` |
 | `source` | text(50) | required, default `simulation` — distinguishes a simulated trade from a user's own fill (`user`) |
+
+Since v04 (after P7) a trade also records which orders it filled, through the
+relationships `FillsBuy` and `FillsSell` below.
+
+#### OrderEvents
+*Added in v04, after P7.* The audit trail of an order: one event for its
+placement, one for every (partial) fill, and one for a cancellation. The
+`Orders` row only holds the current state; this entity keeps the history of
+how the order got there. Events are recorded automatically by the database.
+
+**Keys:** candidate `{id}` only; primary key **`id`** (auto-incrementing
+integer, events are only read in order).
+
+| Attribute | Type | Constraints |
+|---|---|---|
+| `id` | integer | PK, required, auto-generated |
+| `event_type` | text | required, `placed`, `partially_filled`, `filled` or `cancelled` |
+| `quantity` | numeric(20,4) | required — the ordered quantity for `placed`, the filled amount for a fill, the unfilled rest for `cancelled` |
+| `price` | numeric(18,6) | optional — the order price, or the trade price for a fill |
+| `status_after` | text | required, the order's status after the event |
+| `created_at` | timestamptz | required, defaults to now |
 
 #### MarketCandles
 OHLCV aggregates per market and timeframe — the data a price chart is drawn
@@ -221,6 +245,20 @@ attributes.
 
 #### Fills — Markets (1) : MarketTrades (N), total on MarketTrades
 Every executed trade happened on exactly one market. No attributes.
+
+#### FillsBuy — Orders (1) : MarketTrades (N), partial on both sides
+*Added in v04, after P7.* The buy order a trade filled. An order can be
+filled by many trades (partial fills); a trade fills at most one buy order,
+and none when the simulated market was the buyer. No attributes.
+
+#### FillsSell — Orders (1) : MarketTrades (N), partial on both sides
+*Added in v04, after P7.* The sell order a trade filled, symmetric to
+`FillsBuy`. A trade between two users' orders participates in both. No
+attributes.
+
+#### Logs — Orders (1) : OrderEvents (N), total on OrderEvents
+*Added in v04, after P7.* Every event belongs to exactly one order. No
+attributes.
 
 #### Aggregates — Markets (1) : MarketCandles (N), total on MarketCandles
 Every candle summarises trades of exactly one market. No attributes.
@@ -289,12 +327,22 @@ asset need not be on any list.
   [RelationalDesign](../P2-RelationalDesign/RelationalDesign.md) and
   [UseCase0005](../P3-UseCaseModel/UseCase0005.md) for how the new attribute
   is enforced.
+- **v04 — after P7.** Phase 7 (order, balance and trade consistency) needed
+  data the model did not have, so the model was extended to stay in line with
+  the database:
+  - `Users.reserved_balance`: cash reserved by open buy orders;
+  - `Orders.filled_quantity` and the status value `partially_filled`: orders
+    can now be filled in parts;
+  - the relationships `FillsBuy` and `FillsSell` between `Orders` and
+    `MarketTrades`: which orders a trade filled;
+  - the entity set `OrderEvents` with the relationship `Logs`: the
+    automatically recorded history of every order.
+
+  Nothing existing was removed or changed. See
+  [AdvancedDatabaseDevelopment](../P7-AdvancedDatabaseDevelopment/AdvancedDatabaseDevelopment.md).
+  The diagram files are `ERModel_v04.xml` / `ERModel_v04.png`; earlier versions
+  are kept.
 
 Reasoning for the AI-assisted part of this phase, and the full interaction log,
 are on [ERModelAIUsage](ERModelAIUsage.md).
 
-> **Student action required.** Open `ERModel_v03.xml` in TerraER, read the
-> whole diagram — not just the new `reserved_quantity` ellipse — and change
-> anything you disagree with, including the compaction. The phase rules
-> require the model to be yours; this is a generated revision to review and
-> take over, not an answer to submit unread.

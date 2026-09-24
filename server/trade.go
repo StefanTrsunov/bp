@@ -1,34 +1,37 @@
 package main
 
 import (
-	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+
+	"github.com/lib/pq"
 
 	"bp_project/server/db"
 )
 
 // PlaceOrder - UC0004 (buy) / UC0005 (sell)
-// Market order that executes immediately against the latest price.
-// Runs inside a single database transaction so the orders, holdings,
-// users.balance and transactions tables always agree.
-//
-// The order still passes through 'open' before 'executed'. Placing it
-// reserves whatever it commits — on a sell, the crypto being sold, tracked in
-// holdings.reserved_quantity — before anything is actually moved, so a
-// second order against the same holding can never be granted the same units
-// twice. Because only market orders are implemented, reserve and settle
-// happen inside this one transaction rather than across two commits; a
-// future limit-order matcher would split them into a second transaction
-// later, without needing a schema change.
+// Market or limit order. All the database work — checking free cash/crypto,
+// reserving it, recording the order, matching it against the order book and
+// filling the rest from the simulated market — is done by the P7 stored
+// function project.place_order in one call, so it is one atomic statement
+// and the P7 triggers keep orders, trades, holdings and balances consistent.
 func PlaceOrder(s *Session, side string) {
 	if side != "buy" && side != "sell" {
 		fmt.Println("Invalid side.")
 		return
 	}
-	fmt.Printf("\n-- Place market %s order --\n", side)
+	fmt.Printf("\n-- Place %s order --\n", side)
 
-	m, err := ChooseMarket()
+	// buy: any market; sell: only what the user holds and can still sell
+	var m *Market
+	var err error
+	if side == "buy" {
+		m, err = ChooseMarket()
+	} else {
+		m, err = ChooseHolding(s)
+	}
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -39,197 +42,221 @@ func PlaceOrder(s *Session, side string) {
 		return
 	}
 	fmt.Printf("Latest price for %s/%s = %.6f\n", m.Symbol, m.Quote, price)
+	printBookSide(m, side)
 
-	qtyStr := prompt("Quantity: ")
-	qty, err := strconv.ParseFloat(qtyStr, 64)
+	fmt.Println("[1] Market order (fills now at the best available price)")
+	fmt.Println("[2] Limit order (fills only at your price or better, otherwise waits in the order book)")
+	orderType := map[string]string{"1": "market", "2": "limit"}[prompt("> ")]
+	if orderType == "" {
+		fmt.Println("Unknown option.")
+		return
+	}
+
+	qty, err := strconv.ParseFloat(prompt("Quantity: "), 64)
 	if err != nil || qty <= 0 {
 		fmt.Println("Invalid quantity.")
 		return
 	}
-	notional := qty * price
-
-	tx, err := db.DB.Begin()
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
+	var limit optFloat
+	if orderType == "limit" {
+		p, err := strconv.ParseFloat(prompt("Limit price: "), 64)
+		if err != nil || p <= 0 {
+			fmt.Println("Invalid price.")
+			return
+		}
+		limit = optFloat{p, true}
 	}
-	defer tx.Rollback()
 
-	// 1. record the order as 'open' — no trade has happened yet.
 	var orderID string
-	err = tx.QueryRow(
-		`INSERT INTO orders (user_id, market_id, side, type, status, quantity, price)
-		 VALUES ($1, $2, $3, 'market', 'open', $4, $5)
-		 RETURNING id`,
-		s.UserID, m.ID, side, qty, price,
+	err = db.DB.QueryRow(
+		`SELECT place_order($1, $2, $3, $4, $5, $6)`,
+		s.UserID, m.ID, side, orderType, qty, limit.value(),
 	).Scan(&orderID)
 	if err != nil {
-		fmt.Println("Error creating order:", err)
+		fmt.Println(dbMessage(err))
 		return
 	}
 
-	if side == "buy" {
-		// check balance
-		var avail float64
-		if err := tx.QueryRow(
-			`SELECT available_balance FROM users WHERE id = $1 FOR UPDATE`,
-			s.UserID).Scan(&avail); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-		if avail < notional {
-			fmt.Printf("Insufficient funds: need %.4f, have %.4f\n", notional, avail)
-			return
-		}
-
-		// debit balance
-		if _, err := tx.Exec(
-			`UPDATE users
-			    SET available_balance = available_balance - $1,
-			        invested_balance  = invested_balance  + $1,
-			        updated_at        = now()
-			  WHERE id = $2`,
-			notional, s.UserID,
-		); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-
-		// a buy never reserves crypto, only ever adds it — upsert holding
-		// with running weighted average
-		if err := upsertHoldingOnBuy(tx, s.UserID, m.CryptoID, qty, price); err != nil {
-			fmt.Println("Error updating holding:", err)
-			return
-		}
-
-		// ledger entry
-		if _, err := tx.Exec(
-			`INSERT INTO transactions (user_id, type, amount, currency, related_order, description)
-			 VALUES ($1, 'buy', $2, 'USD', $3, $4)`,
-			s.UserID, -notional, orderID,
-			fmt.Sprintf("Market buy %.4f %s @ %.6f", qty, m.Symbol, price),
-		); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-	} else {
-		// sell: lock the holding and check what is actually free to sell —
-		// quantity minus whatever another open order has already reserved.
-		var held, reserved, avgPrice float64
-		err := tx.QueryRow(
-			`SELECT quantity, reserved_quantity, avg_price FROM holdings
-			  WHERE user_id = $1 AND crypto_id = $2 FOR UPDATE`,
-			s.UserID, m.CryptoID,
-		).Scan(&held, &reserved, &avgPrice)
-		if err != nil && err != sql.ErrNoRows {
-			fmt.Println("Error:", err)
-			return
-		}
-		available := held - reserved
-		if err == sql.ErrNoRows || available < qty {
-			fmt.Printf("Insufficient holding: trying to sell %.4f, available %.4f (of %.4f held, %.4f reserved)\n",
-				qty, available, held, reserved)
-			return
-		}
-
-		// reserve: committed to this order, not yet removed from the position.
-		if _, err := tx.Exec(
-			`UPDATE holdings
-			    SET reserved_quantity = reserved_quantity + $1,
-			        updated_at        = now()
-			  WHERE user_id = $2 AND crypto_id = $3`,
-			qty, s.UserID, m.CryptoID,
-		); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-
-		// settle: a market order fills immediately, so release the
-		// reservation and remove the asset from the position in one step.
-		if _, err := tx.Exec(
-			`UPDATE holdings
-			    SET quantity          = quantity - $1,
-			        reserved_quantity = reserved_quantity - $1,
-			        updated_at        = now()
-			  WHERE user_id = $2 AND crypto_id = $3`,
-			qty, s.UserID, m.CryptoID,
-		); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-
-		// credit balance; reduce invested by cost basis (avg_price * qty)
-		costBasis := avgPrice * qty
-		if _, err := tx.Exec(
-			`UPDATE users
-			    SET available_balance = available_balance + $1,
-			        invested_balance  = GREATEST(invested_balance - $2, 0),
-			        updated_at        = now()
-			  WHERE id = $3`,
-			notional, costBasis, s.UserID,
-		); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-
-		// ledger entry
-		if _, err := tx.Exec(
-			`INSERT INTO transactions (user_id, type, amount, currency, related_order, description)
-			 VALUES ($1, 'sell', $2, 'USD', $3, $4)`,
-			s.UserID, notional, orderID,
-			fmt.Sprintf("Market sell %.4f %s @ %.6f", qty, m.Symbol, price),
-		); err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-	}
-
-	// record the resulting market trade so the book reflects this fill
-	if _, err := tx.Exec(
-		`INSERT INTO market_trades (market_id, executed_at, price, quantity, side, source)
-		 VALUES ($1, now(), $2, $3, $4, 'user')`,
-		m.ID, price, qty, side,
-	); err != nil {
+	var status string
+	var filled, remaining float64
+	var avg *float64
+	if err := db.DB.QueryRow(
+		`SELECT status, filled_quantity, remaining, avg_fill_price
+		   FROM v_order_history WHERE order_id = $1`, orderID,
+	).Scan(&status, &filled, &remaining, &avg); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-
-	// settle the order itself: it has now actually been filled.
-	if _, err := tx.Exec(
-		`UPDATE orders SET status = 'executed', executed_at = now() WHERE id = $1`,
-		orderID,
-	); err != nil {
-		fmt.Println("Error:", err)
-		return
+	switch status {
+	case "executed":
+		fmt.Printf("Order executed: %s %.4f %s, average price %.6f\n", side, filled, m.Symbol, *avg)
+	case "partially_filled":
+		fmt.Printf("Order partially filled: %.4f %s at average %.6f, %.4f waiting in the order book\n",
+			filled, m.Symbol, *avg, remaining)
+	default:
+		fmt.Printf("Order placed in the order book: %s %.4f %s at %.6f\n", side, remaining, m.Symbol, limit.v)
 	}
-
-	if err := tx.Commit(); err != nil {
-		fmt.Println("Commit error:", err)
-		return
-	}
-	fmt.Printf("Order executed: %s %.4f %s @ %.6f (notional %.4f USD)\n",
-		side, qty, m.Symbol, price, notional)
 }
 
-// upsertHoldingOnBuy creates or updates a holding using running weighted-average price.
-//
-// This is a single statement that relies on UNIQUE (user_id, crypto_id): the new
-// weighted average is recomputed by the database in numeric arithmetic rather
-// than in Go float64, and no separate SELECT ... FOR UPDATE round-trip is
-// needed because ON CONFLICT DO UPDATE locks the conflicting row itself.
-// Every SET expression sees the pre-update row, so `holdings.quantity` below is
-// still the old quantity while the average is being computed.
-func upsertHoldingOnBuy(tx *sql.Tx, userID, cryptoID string, qty, price float64) error {
-	_, err := tx.Exec(
-		`INSERT INTO holdings (user_id, crypto_id, quantity, avg_price, updated_at)
-		 VALUES ($1, $2, $3, $4, now())
-		 ON CONFLICT (user_id, crypto_id) DO UPDATE
-		    SET avg_price  = (holdings.quantity * holdings.avg_price
-		                       + EXCLUDED.quantity * EXCLUDED.avg_price)
-		                     / (holdings.quantity + EXCLUDED.quantity),
-		        quantity   = holdings.quantity + EXCLUDED.quantity,
-		        updated_at = now()`,
-		userID, cryptoID, qty, price,
-	)
-	return err
+// optFloat is an optional float parameter (NULL when not set).
+type optFloat struct {
+	v  float64
+	ok bool
+}
+
+func (n optFloat) value() any {
+	if !n.ok {
+		return nil
+	}
+	return n.v
+}
+
+// dbMessage shows a rule the database refused (P7 raises check_violation
+// with a readable message) without the driver's prefix.
+func dbMessage(err error) string {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code.Class() == "23" {
+		return "Rejected: " + pqErr.Message
+	}
+	return "Error: " + err.Error()
+}
+
+// printBookSide shows the best resting orders on the side this order would
+// trade against (asks for a buy, bids for a sell).
+func printBookSide(m *Market, side string) {
+	other, order := "sell", "price ASC"
+	if side == "sell" {
+		other, order = "buy", "price DESC"
+	}
+	rows, err := db.DB.Query(
+		`SELECT price, quantity, orders FROM v_order_book
+		  WHERE market_id = $1 AND side = $2 ORDER BY `+order+` LIMIT 5`, m.ID, other)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer rows.Close()
+	label := map[string]string{"sell": "asks", "buy": "bids"}[other]
+	first := true
+	for rows.Next() {
+		var price, qty float64
+		var n int
+		if err := rows.Scan(&price, &qty, &n); err != nil {
+			fmt.Println("scan error:", err)
+			return
+		}
+		if first {
+			fmt.Printf("Order book %s (other users' limit orders):\n", label)
+			first = false
+		}
+		fmt.Printf("  %14.6f  %12.4f  (%d orders)\n", price, qty, n)
+	}
+	if first {
+		fmt.Printf("Order book has no %s - a market order fills from the simulated market.\n", label)
+	}
+}
+
+// ShowOrderBook - P7 view v_order_book for one market.
+func ShowOrderBook() {
+	m, err := ChooseMarket()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	rows, err := db.DB.Query(
+		`SELECT side, price, quantity, orders FROM v_order_book
+		  WHERE market_id = $1
+		  ORDER BY side DESC, price DESC`, m.ID)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer rows.Close()
+	fmt.Printf("\n  Order book %s/%s\n", m.Symbol, m.Quote)
+	fmt.Printf("  %-5s  %14s  %12s  %6s\n", "Side", "Price", "Quantity", "Orders")
+	fmt.Println("  " + strings.Repeat("-", 44))
+	empty := true
+	for rows.Next() {
+		var side string
+		var price, qty float64
+		var n int
+		if err := rows.Scan(&side, &price, &qty, &n); err != nil {
+			fmt.Println("scan error:", err)
+			return
+		}
+		fmt.Printf("  %-5s  %14.6f  %12.4f  %6d\n", map[string]string{"sell": "ask", "buy": "bid"}[side], price, qty, n)
+		empty = false
+	}
+	if empty {
+		fmt.Println("  (no resting limit orders)")
+	}
+}
+
+// activeOrder is one row of the user's open orders list.
+type activeOrder struct {
+	id, symbol, side, typ, status string
+	qty, filled, remaining, price float64
+}
+
+// listMyOrders prints the user's active orders numbered 1..n (P7 view
+// v_active_orders) and returns them, so the user can pick one by number.
+func listMyOrders(s *Session) []activeOrder {
+	rows, err := db.DB.Query(
+		`SELECT order_id, symbol, side, type, status, quantity, filled_quantity, remaining, price
+		   FROM v_active_orders WHERE user_id = $1 ORDER BY placed_at`, s.UserID)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
+	defer rows.Close()
+	var list []activeOrder
+	for rows.Next() {
+		var o activeOrder
+		if err := rows.Scan(&o.id, &o.symbol, &o.side, &o.typ, &o.status,
+			&o.qty, &o.filled, &o.remaining, &o.price); err != nil {
+			fmt.Println("scan error:", err)
+			return nil
+		}
+		list = append(list, o)
+	}
+	fmt.Println()
+	if len(list) == 0 {
+		fmt.Println("  (no open orders)")
+		return nil
+	}
+	fmt.Printf("  %-3s  %-6s  %-4s  %-6s  %-16s  %10s  %10s  %14s\n",
+		"#", "Symbol", "Side", "Type", "Status", "Filled", "Remaining", "Price")
+	fmt.Println("  " + strings.Repeat("-", 84))
+	for i, o := range list {
+		fmt.Printf("  %-3d  %-6s  %-4s  %-6s  %-16s  %10.4f  %10.4f  %14.6f\n",
+			i+1, o.symbol, o.side, o.typ, o.status, o.filled, o.remaining, o.price)
+	}
+	return list
+}
+
+// ShowMyOrders - P7 view v_active_orders.
+func ShowMyOrders(s *Session) {
+	listMyOrders(s)
+}
+
+// CancelOrder - P7 stored function project.cancel_order, which releases
+// the reserved cash or crypto of what is still unfilled.
+func CancelOrder(s *Session) {
+	list := listMyOrders(s)
+	if len(list) == 0 {
+		return
+	}
+	n, err := strconv.Atoi(prompt("Order # to cancel (0 = back): "))
+	if err != nil || n < 0 || n > len(list) {
+		fmt.Println("Invalid choice.")
+		return
+	}
+	if n == 0 {
+		return
+	}
+	if _, err := db.DB.Exec(`SELECT cancel_order($1, $2)`, list[n-1].id, s.UserID); err != nil {
+		fmt.Println(dbMessage(err))
+		return
+	}
+	fmt.Println("Order cancelled; its reservation was released.")
 }

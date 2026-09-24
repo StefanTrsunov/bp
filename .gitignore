@@ -1,6 +1,8 @@
 # Build output
 /eduberza
 /bots/bots
+/server/server
+/server/eduberza
 
 # Local configuration and secrets — never commit; use .env.example as template
 .env

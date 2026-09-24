@@ -282,7 +282,33 @@ before saving, rather than trusting the library's own (transparent) output.
 Verified the fix by reading back the corner pixel of the written PNG as pure
 white `(255,255,255)`, matching `ERModel_v02.png`.
 
-> **Student action required.** Open `ERModel_v03.xml` in TerraER and read it
-> end to end before submission — see the note at the end of
-> [ERModel](ERModel.md). Everything else in this session's diff is already
-> applied to the docs and to `server/`.
+
+### Session 4 — 2026-09-24 (Claude Opus 5.5): v04 after P7
+
+**Prompts (student, verbatim):**
+> But this order_events is added after Phase 7 right? can we add that too?
+
+> can you make the ERmodel again with TerraER file to update it? and tell that after P7 we added this
+
+> Make it with a white background like earier versions
+
+**Response (AI, summarised):**
+
+- Explained that the P7 changes must also appear in P1 and P2, since both must describe the
+  current data structure.
+- Built `ERModel_v04.xml` in TerraER's own file format by taking `ERModel_v03.xml` unchanged
+  and appending the new elements with the same XML structure TerraER uses:
+  - the attribute `reserved_balance` on `Users`;
+  - the attribute `filled_quantity` on `Orders`;
+  - the relationships `FillsBuy` and `FillsSell` (Orders 1 : N MarketTrades, partial);
+  - the entity set `OrderEvents` (key `id`, `event_type`, `quantity`, `price`,
+    `status_after`, `created_at`) with `Logs` (Orders 1 : N OrderEvents, total on
+    OrderEvents).
+- Rendered `ERModel_v04.png` with TerraER 3.14's own drawing classes (loading the `.xml`
+  exactly as TerraER does and using its image export), on a white background and trimmed like
+  the earlier versions.
+- Updated [ERModel](ERModel.md) (title v.04, new attribute rows, the `OrderEvents` section, the
+  three relationships, and a v04 history entry stating these were added after P7).
+
+**What I decided:** to add the P7 structure to the ER model. The new elements are placed
+automatically, so the layout can be tidied by hand in TerraER.

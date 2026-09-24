@@ -256,19 +256,86 @@ relations (see the "Source FDs" column above — no FD is split across two relat
 union of the FDs that hold on `R_USERS, …, R_WATCHLIST_ITEMS` is therefore exactly FD1–FD17
 again: nothing was lost.
 
-**Lossless join.** For every pair (referencing relation, referenced relation) connected by a
-foreign key — `R_MARKETS.M_CRYPTO_ID → R_CRYPTO.C_ID`, `R_HOLDINGS.H_USER_ID → R_USERS.U_ID` /
-`R_HOLDINGS.H_CRYPTO_ID → R_CRYPTO.C_ID`, `R_ORDERS.O_USER_ID → R_USERS.U_ID` /
-`R_ORDERS.O_MARKET_ID → R_MARKETS.M_ID`, `R_TRANSACTIONS.T_USER_ID → R_USERS.U_ID` /
-`R_TRANSACTIONS.T_RELATED_ORDER → R_ORDERS.O_ID`, `R_MARKET_TRADES.MT_MARKET_ID →
-R_MARKETS.M_ID`, `R_MARKET_CANDLES.MC_MARKET_ID → R_MARKETS.M_ID`,
-`R_WATCHLISTS.W_USER_ID → R_USERS.U_ID`, `R_WATCHLIST_ITEMS.WI_WATCHLIST_ID →
-R_WATCHLISTS.W_ID` / `R_WATCHLIST_ITEMS.WI_CRYPTO_ID → R_CRYPTO.C_ID` — the join attribute on
-the "one" side is that relation's own primary key (`U_ID`, `C_ID`, `M_ID`, `O_ID`, `W_ID`).
-A join on a foreign key equated to the primary key it references is the textbook sufficient
-condition for a lossless decomposition (`Ri ∩ Rj` is a key of `Rj`), so re-joining all ten
-relations on their foreign-key/primary-key pairs reconstructs `R_EDUBERZA` exactly, with no
-spurious rows and none missing.
+**Lossless join — chase test.**
+
+> *Note: the chase algorithm is not part of the course material. I was curious about a
+> stricter way to test lossless join than the usual "the common attributes are a key of one
+> side" argument, so I applied it here.*
+
+The chase decides whether a decomposition `R = R1 ∪ … ∪ Rn` is lossless under a set of
+functional dependencies. Build a tableau with one column per attribute of `R` and one row per
+relation `Ri`. In row `i`, put a distinguished symbol `a` in every column of `Ri` and a unique
+symbol `b_i` in every other column. Then repeat, until nothing changes: for each FD `X → Y`,
+whenever two rows agree on all of `X`, make them agree on `Y`. If they disagree, an `a` wins,
+otherwise one `b` replaces the other. **The decomposition is lossless exactly when some row
+ends up with `a` in every column.**
+
+All attributes of one cluster (`U_*`, `C_*`, `M_*`, …) always appear together, and FD1–FD17
+never mix clusters. So each cluster is one column group below: `a` means every column of the
+group holds a distinguished symbol, and `b` means none of them does. The foreign-key
+attributes (`H_USER_ID`, `O_MARKET_ID`, …) belong to their own cluster (`H_*`, `O_*`, …), not
+to the cluster they reference.
+
+**Step 1 — the ten relations from the table above.**
+
+```
+              U*  C*  M*  H*  O*  T*  MT* MC* W*  WI*
+R_USERS        a   b   b   b   b   b   b   b   b   b
+R_CRYPTO       b   a   b   b   b   b   b   b   b   b
+R_MARKETS      b   b   a   b   b   b   b   b   b   b
+R_HOLDINGS     b   b   b   a   b   b   b   b   b   b
+R_ORDERS       b   b   b   b   a   b   b   b   b   b
+R_TRANSACTIONS b   b   b   b   b   a   b   b   b   b
+R_MARKET_TR.   b   b   b   b   b   b   a   b   b   b
+R_MARKET_CA.   b   b   b   b   b   b   b   a   b   b
+R_WATCHLISTS   b   b   b   b   b   b   b   b   a   b
+R_WATCHLIST_I. b   b   b   b   b   b   b   b   b   a
+```
+
+Every FD has its left side inside one cluster, for example `U_ID → U_*` or
+`H_USER_ID, H_CRYPTO_ID → H_ID`. For such an FD to fire, two rows would have to agree on that
+left side. But only one row has `a`s in that cluster, and the `b`s of different rows are
+all different, so no two rows ever agree on any left side. **The chase changes nothing, and
+no row becomes all `a`.** Under FD1–FD17 alone, the ten relations are *not* guaranteed to
+join back to `R_EDUBERZA`. This is not an accident of this model. It is exactly why
+Bernstein's synthesis algorithm has a final step: *if no synthesised relation contains a
+candidate key of `R`, add one that does.* None of the ten contains the ten-attribute key.
+
+**Step 2 — add the key relation** `R_KEY(U_ID, C_ID, M_ID, H_ID, O_ID, T_ID, MT_ID, MC_ID,
+W_ID, WI_ID)`. Its row has `a` only in the ten ID columns, written `a·` for "`a` in the ID,
+`b` in the rest of the group":
+
+```
+              U*  C*  M*  H*  O*  T*  MT* MC* W*  WI*
+R_KEY          a·  a·  a·  a·  a·  a·  a·  a·  a·  a·
+(the ten rows of step 1 unchanged)
+```
+
+Now FD1 `U_ID → U_*` fires: row `R_KEY` and row `R_USERS` both have `a` in `U_ID`, so they
+must agree on the rest of `U_*`, and `R_USERS` has `a` there. `R_KEY` becomes `a` in the whole
+`U*` group. The same happens with FD4 (`C*`), FD6 (`M*`), FD8 (`H*`), FD10 (`O*`), FD11 (`T*`),
+FD12 (`MT*`), FD13 (`MC*`), FD15 (`W*`) and FD16 (`WI*`):
+
+```
+              U*  C*  M*  H*  O*  T*  MT* MC* W*  WI*
+R_KEY          a   a   a   a   a   a   a   a   a   a     <- all distinguished
+```
+
+**Row `R_KEY` is all `a`, so the decomposition into the ten relations plus `R_KEY` is
+lossless.**
+
+**Why `R_KEY` is not kept in the final schema.** An instance of `R_KEY` would only record
+which ID of one cluster appears together with which ID of every other cluster. As shown under
+*Candidate keys and primary key*, the ten clusters are independent record types, and
+`R_EDUBERZA` pairs every row of one with every row of the others. So `R_KEY` would be just the
+cross product of the ten ID sets and would carry no information. The same independence means
+the join dependency `⋈[R_USERS, …, R_WATCHLIST_ITEMS]` holds on `R_EDUBERZA` by construction.
+Under that dependency the ten relations alone already reconstruct it: their natural join, with
+no common attributes, is exactly that cross product. The chase makes this reasoning explicit.
+FDs by themselves cannot prove the join lossless; you need either the key relation or the
+independence of the clusters. That was hidden in the earlier "foreign key equals primary key"
+argument, which described the equi-joins the application runs, not the natural join the
+lossless-join property is about.
 
 ## 3NF decomposition
 

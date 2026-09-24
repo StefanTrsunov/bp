@@ -69,14 +69,17 @@ func authenticatedMenu(s *Session) {
 	fmt.Println("[1] View balance")
 	fmt.Println("[2] Deposit virtual funds")
 	fmt.Println("[3] Browse markets")
-	fmt.Println("[4] Place market BUY order")
-	fmt.Println("[5] Place market SELL order")
+	fmt.Println("[4] Place BUY order")
+	fmt.Println("[5] Place SELL order")
 	fmt.Println("[6] View portfolio")
 	fmt.Println("[7] View transaction history")
 	fmt.Println("[8] Manage watchlist")
 	fmt.Println("[9] Logout")
 	fmt.Println("[10] Report: top traders")
 	fmt.Println("[11] Report: market performance")
+	fmt.Println("[12] Order book")
+	fmt.Println("[13] My open orders")
+	fmt.Println("[14] Cancel an order")
 	fmt.Println("[0] Exit")
 	switch prompt("> ") {
 	case "1":
@@ -99,6 +102,12 @@ func authenticatedMenu(s *Session) {
 		ShowTopTraders(s)
 	case "11":
 		ShowMarketPerformance(s)
+	case "12":
+		ShowOrderBook()
+	case "13":
+		ShowMyOrders(s)
+	case "14":
+		CancelOrder(s)
 	case "9":
 		s.UserID = ""
 		s.Username = ""

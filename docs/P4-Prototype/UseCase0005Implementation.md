@@ -1,214 +1,260 @@
-# Use-case 0005 Implementation — Sell
+# Use-case 0005 Implementation - Place market SELL order
 
-**Initiating actor:** Trader. **Source file:** `server/trade.go`, function `PlaceOrder(s, "sell")`.
+**Initiating actor:** Trader
 
-## The bug this closes
+**Other actors:** Market Simulator (indirect — supplies the current price).
 
-Before this change, `holdings` had `quantity` and `avg_price` only. The sell
-path checked `held < qty` straight against `quantity`, which cannot tell
-"owned" apart from "owned, but already committed to another order that has
-not settled." `holdings.reserved_quantity` fixes that: the crypto being sold
-is reserved before it is removed from the position, and the check is against
-`quantity - reserved_quantity`.
+A logged-in Trader sells part or all of a holding at the current market price. The
+Trader never types a symbol: the system lists only the cryptos the Trader holds and can
+still sell (the quantity not already reserved by an open sell order), numbered, with
+how much is held and how much is free, and the Trader picks one by its number and
+enters the quantity. In one database transaction the system records the order,
+reserves the crypto being sold and settles it, credits the proceeds to the Trader's
+available cash while reducing the invested cash by the cost basis, writes a ledger
+entry and a market trade, and marks the order executed. Cost basis is preserved, so
+the realised P/L can be reconstructed from the ledger.
 
-## Scenario (implemented)
+Original use-case description (P3): [UseCase0005](../P3-UseCaseModel/UseCase0005.md).
+Implementation: [`server/trade.go`](../../server/trade.go), function
+`PlaceOrder(s, "sell")`, which calls `ChooseHolding`, `pickNumber` and `LatestPrice`
+from [`server/market.go`](../../server/market.go).
 
-1. **User** chooses `[5] Place market SELL order`.
-2. **System** lists markets (same as UC0004 step 2).
-3. **User** enters market symbol, e.g. `ETH`, then quantity `0.5`.
-4. **System** opens a transaction and runs:
+All statements run on the `project` schema (the connection sets
+`search_path=project,public` in `server/db/db.go`). The SQL below is copied from the
+Go code; only the Go source indentation is removed, a `;` is added after each
+statement of the transaction, and `--` comments say what each `$n` placeholder is
+bound to.
+
+The run shown is user `alice` right after the buy of
+[UseCase0004](UseCase0004Implementation.md): 7578.60 USD available, holdings
+0.01 BTC (bought at 67140) and 0.5 ETH (bought at 3500). She sells 0.2 ETH.
+
+## Reserve, then settle
+
+The crypto being sold is **reserved** (`holdings.reserved_quantity`) before it is
+removed from the position, and the sell check is against what is truly still free,
+`quantity - reserved_quantity`, not against the raw `quantity`, which would also count
+crypto already promised to another order. Because only market orders are implemented,
+an order settles in the same transaction it is placed in, so reserve and settle are two
+statements inside one commit; they stay logically distinct so that a future
+limit-order matcher, where an order would stay `open` until a *later* transaction fills
+it, needs a second transaction but no schema change.
+
+## Scenario
+
+1. **Trader** chooses `[5] Place market SELL order` in the authenticated menu (types `5`).
+2. **System** prints `-- Place market sell order --` and lists, numbered, only the
+   cryptos the Trader holds with some quantity still free to sell, with the quantity
+   held, the quantity free to sell and the last price (`ChooseHolding`;
+   `$1` = the logged-in user's id):
+
+   ```sql
+   SELECT m.id, c.id, c.symbol, m.quote_currency,
+          h.quantity, h.quantity - h.reserved_quantity AS free,
+          COALESCE(lp.price, 0) AS price
+     FROM holdings h
+     JOIN crypto  c ON c.id = h.crypto_id
+     JOIN markets m ON m.crypto_id = c.id AND m.is_active = true
+     LEFT JOIN v_latest_prices lp ON lp.market_id = m.id
+    WHERE h.user_id = $1
+      AND h.quantity - h.reserved_quantity > 0
+    ORDER BY c.symbol
+   ```
+
+   For alice it prints `1 BTC USD 0.0100 0.0100 67140.000000` and
+   `2 ETH USD 0.5000 0.5000 3520.000000`, then asks `Holding #:`. Go keeps each row's
+   market id and crypto id in memory; the Trader only types the list number. (If the
+   query returns no row, the system prints `you hold no crypto that is free to sell`
+   and the use-case ends.)
+
+   ![UC0005 steps 1-2: Trader chooses SELL, system lists what they hold](screenshots/uc0005_1_2_holdings.png)
+
+3. **Trader** picks the holding by its number in the list: `2` (ETH).
+4. **System** takes the market id and crypto id of row 2 from the list and reads the
+   latest price of that market (`LatestPrice`; `$1` = the chosen market's id):
+
+   ```sql
+   SELECT price FROM v_latest_prices WHERE market_id = $1
+   ```
+
+   It prints `Latest price for ETH/USD = 3520.000000` and asks `Quantity:`.
+
+   ![UC0005 steps 3-4: Trader picks holding #2 (ETH), system shows the price](screenshots/uc0005_3_4_price.png)
+
+5. **Trader** enters the quantity `0.2`.
+6. **System** computes in Go notional = quantity × price = 0.2 × 3520 = 704.00 and
+   runs one database transaction; the statements are in exactly the order
+   `PlaceOrder` executes them for a sell. After statement (b) Go also computes the
+   cost basis = avg_price × quantity = 3500 × 0.2 = 700.00 from the locked holding row;
+   both values are passed to SQL as parameters.
 
    ```sql
    BEGIN;
 
-   -- (a) record the order as 'open' — no trade has happened yet
-   INSERT INTO orders
-       (user_id, market_id, side, type, status, quantity, price)
-   VALUES
-       ($1, $2, 'sell', 'market', 'open', $3, $4)
-   RETURNING id;
+   -- (a) record the order as 'open' — no trade has happened yet.
+   --     $1 = user id, $2 = market id, $3 = side (the Go variable side = 'sell'),
+   --     $4 = quantity (0.2), $5 = price (3520); the returned id is kept in Go.
+   INSERT INTO orders (user_id, market_id, side, type, status, quantity, price)
+    VALUES ($1, $2, $3, 'market', 'open', $4, $5)
+    RETURNING id;
 
-   -- (b) lock the holding and check what is actually free to sell
+   -- (b) lock the holding row and read what is held, what is already reserved and
+   --     the average entry price. $1 = user id, $2 = crypto id.
+   --     Go computes available = quantity - reserved_quantity (0.5 - 0 = 0.5);
+   --     if there is no row or available < quantity -> alternate flow 5a.
    SELECT quantity, reserved_quantity, avg_price FROM holdings
-    WHERE user_id = $1 AND crypto_id = $c FOR UPDATE;
-   -- available := quantity - reserved_quantity
-   -- abort if missing or available < $qty
+     WHERE user_id = $1 AND crypto_id = $2 FOR UPDATE;
 
-   -- (c) reserve: committed to this order, not yet removed from the position
+   -- (c) reserve: committed to this order, not yet removed from the position.
+   --     $1 = quantity (0.2), $2 = user id, $3 = crypto id.
    UPDATE holdings
-      SET reserved_quantity = reserved_quantity + $qty, updated_at = now()
-    WHERE user_id = $1 AND crypto_id = $c;
+       SET reserved_quantity = reserved_quantity + $1,
+           updated_at        = now()
+     WHERE user_id = $2 AND crypto_id = $3;
 
-   -- (d) settle: a market order fills immediately, so release the
-   --     reservation and remove the asset in the same step
+   -- (d) settle: a market order fills immediately, so release the reservation and
+   --     remove the asset from the position in one step. Same parameters as (c).
    UPDATE holdings
-      SET quantity = quantity - $qty,
-          reserved_quantity = reserved_quantity - $qty,
-          updated_at = now()
-    WHERE user_id = $1 AND crypto_id = $c;
+       SET quantity          = quantity - $1,
+           reserved_quantity = reserved_quantity - $1,
+           updated_at        = now()
+     WHERE user_id = $2 AND crypto_id = $3;
 
+   -- (e) credit the proceeds; reduce invested cash by the cost basis.
+   --     $1 = notional (704.00), $2 = cost basis (700.00), $3 = user id.
    UPDATE users
-      SET available_balance = available_balance + $notional,
-          invested_balance  = GREATEST(invested_balance - ($avg * $qty), 0),
-          updated_at        = now()
-    WHERE id = $1;
+       SET available_balance = available_balance + $1,
+           invested_balance  = GREATEST(invested_balance - $2, 0),
+           updated_at        = now()
+     WHERE id = $3;
 
-   INSERT INTO transactions
-       (user_id, type, amount, currency, related_order, description)
-   VALUES
-       ($1, 'sell', $notional, 'USD', $orderId, 'Market sell ...');
+   -- (f) ledger entry. $1 = user id, $2 = notional (704.00), $3 = order id from (a),
+   --     $4 = description built in Go: 'Market sell 0.2000 ETH @ 3520.000000'.
+   INSERT INTO transactions (user_id, type, amount, currency, related_order, description)
+    VALUES ($1, 'sell', $2, 'USD', $3, $4);
 
-   INSERT INTO market_trades
-       (market_id, executed_at, price, quantity, side, source)
-   VALUES
-       ($2, now(), $price, $qty, 'sell', 'user');
+   -- (g) record the resulting market trade.
+   --     $1 = market id, $2 = price, $3 = quantity, $4 = side ('sell').
+   INSERT INTO market_trades (market_id, executed_at, price, quantity, side, source)
+    VALUES ($1, now(), $2, $3, $4, 'user');
 
-   -- (e) settle the order itself — it has now actually been filled
-   UPDATE orders SET status = 'executed', executed_at = now() WHERE id = $orderId;
+   -- (h) settle the order itself — it has now actually been filled. $1 = order id.
+   UPDATE orders SET status = 'executed', executed_at = now() WHERE id = $1;
 
    COMMIT;
    ```
 
-   ![Selling 0.5 ETH at the current market price](screenshots/uc0005_sell.png)
+7. **System** confirms
+   `Order executed: sell 0.2000 ETH @ 3520.000000 (notional 704.0000 USD)` and shows
+   the authenticated menu again.
 
-5. **System** prints: `Order executed: sell 0.5000 ETH @ 3520.000000 (notional 1760.0000 USD)`.
+   The screenshot shows steps 5–7: the entered quantity, the confirmation and the menu.
 
-## Failure path — insufficient holding
+   ![UC0005 steps 5-7: quantity entered, order executed](screenshots/uc0005_5_7_executed.png)
 
-If the holding does not exist, or `quantity - reserved_quantity < requested`, the `defer tx.Rollback()` in `server/trade.go` reverts every statement above — including the `open` order, which was never committed — and the user sees:
+After this run the database holds for alice: ETH `quantity` 0.3000 with
+`reserved_quantity` 0.0000; `available_balance` 8282.60 (= 7578.60 + 704.00) and
+`invested_balance` 1721.40 (= 2421.40 − 700.00); a `sell` row in `transactions` with
+amount 704.0000 and description `Market sell 0.2000 ETH @ 3520.000000`; and the order
+with status `executed`. The realised P/L of this sell is notional − cost basis =
+704.00 − 700.00 = +4.00 USD.
 
-```
-Insufficient holding: trying to sell X, available Y (of Z held, W reserved)
-```
+### Alternate flow 5a — insufficient holding
 
-## Verified run — the exact scenario from the design review
-
-Run 2026-09-16 against PostgreSQL 16 (`bp_database` on `localhost:5433`).
-Alice's ETH/BTC holdings were seeded, then her BTC holding was set to exactly
-the scenario that motivated this fix: 2 BTC owned, nothing reserved.
-
-```
-$ psql ... -c "SELECT symbol, quantity, reserved_quantity, avg_price
-               FROM holdings h JOIN crypto c ON c.id = h.crypto_id
-               WHERE user_id = '<alice>';"
-
- symbol | quantity | reserved_quantity |  avg_price
---------+----------+--------------------+-------------
- BTC    |   2.0000 |             0.0000 | 65000.000000
- ETH    |   0.5000 |             0.0000 |  3500.000000
-```
-
-**Step 1 — portfolio before the sell** (`[6] View portfolio`):
+Right after the sell above, alice chooses `[5]` again. The list from step 2 now shows
+`2 ETH USD 0.3000 0.3000 3520.000000`. She picks `2` (ETH) and enters quantity `5`.
+In the transaction, statement (a) inserts the `open` order and statement (b) returns
+quantity 0.3000 and reserved_quantity 0.0000, so available = 0.3 < 5. `PlaceOrder`
+prints
 
 ```
-  Symbol        Quantity      Reserved     Available         Avg buy         Current           Value  Unrealised P/L
-  ------------------------------------------------------------------------------------------------------------------
-  BTC             2.0000        0.0000        2.0000    65000.000000    67140.000000     134280.0000      +4280.0000
-  ETH             0.5000        0.0000        0.5000     3500.000000     3520.000000       1760.0000        +10.0000
-  ------------------------------------------------------------------------------------------------------------------
-  TOTAL                                                                                  136040.0000      +4290.0000
+Insufficient holding: trying to sell 5.0000, available 0.3000 (of 0.3000 held, 0.0000 reserved)
 ```
 
-**Step 2 — `[5] Place market SELL order` → `BTC` → `0.5`:**
+and returns without running (c)–(h); the deferred `tx.Rollback()` undoes statement (a)
+as well, so no order, no reservation and no ledger entry is left behind. The
+authenticated menu is shown again. The same message is printed if the holding row no
+longer exists (for example because it was sold out from another session after the
+list was shown).
 
-```
-Order executed: sell 0.5000 BTC @ 67140.000000 (notional 33570.0000 USD)
-```
+![UC0005 alternate flow 5a: selling more than is held](screenshots/uc0005_5a_insufficient.png)
 
-**Step 3 — portfolio after the sell:**
+## Reserve and settle, step by step
 
-```
-  BTC             1.5000        0.0000        1.5000    65000.000000    67140.000000     100710.0000      +3210.0000
-```
-
-`quantity` dropped from 2.0 to 1.5 and `reserved_quantity` is back to 0.0000
-— reserve and settle both happened, inside the one commit, exactly as
-designed.
-
-## Verified run — reserve and settle as two distinct, observable steps
-
-The CLI settles a market order in the same transaction it reserves in, so
-`reserved_quantity` is never visibly nonzero *outside* a transaction. Run by
-hand in one `psql` session (one transaction, so the session sees its own
-uncommitted writes) to show the intermediate state that step (c) alone would
-leave, before step (d) runs:
+The CLI reserves and settles inside one transaction, so `reserved_quantity` is never
+nonzero *outside* a transaction. The intermediate state is shown by running statements
+(c) and (d) by hand in one `psql` transaction (which sees its own uncommitted
+writes) against alice's ETH holding after the scenario above (0.3 ETH), for a sell of
+0.1, and rolling back at the end so nothing is changed. Literal values replace the
+`$n` parameters; `:alice` and `:eth` are psql variables for
+`(SELECT id FROM users WHERE username = 'alice')` and
+`(SELECT id FROM crypto WHERE symbol = 'ETH')`:
 
 ```sql
 BEGIN;
-
--- before: Alice owns 2 BTC, none reserved
 SELECT quantity, reserved_quantity, quantity - reserved_quantity AS available
-  FROM holdings WHERE user_id = '<alice>' AND crypto_id = '<btc>';
+  FROM holdings WHERE user_id = :alice AND crypto_id = :eth;
 --  quantity | reserved_quantity | available
--- ----------+--------------------+-----------
---    2.0000 |             0.0000 |    2.0000
+-- ----------+-------------------+-----------
+--    0.3000 |            0.0000 |    0.3000
 
--- step (c): order placed, 0.5 BTC reserved — no trade has happened yet
-UPDATE holdings SET reserved_quantity = reserved_quantity + 0.5, updated_at = now()
- WHERE user_id = '<alice>' AND crypto_id = '<btc>';
-
+-- (c) reserve 0.1: the order is placed, no trade has happened yet
+UPDATE holdings SET reserved_quantity = reserved_quantity + 0.1, updated_at = now()
+ WHERE user_id = :alice AND crypto_id = :eth;
 SELECT quantity, reserved_quantity, quantity - reserved_quantity AS available
-  FROM holdings WHERE user_id = '<alice>' AND crypto_id = '<btc>';
+  FROM holdings WHERE user_id = :alice AND crypto_id = :eth;
 --  quantity | reserved_quantity | available
--- ----------+--------------------+-----------
---    2.0000 |             0.5000 |    1.5000
+-- ----------+-------------------+-----------
+--    0.3000 |            0.1000 |    0.2000
 
--- step (d): market order settles immediately, reservation released
-UPDATE holdings SET quantity = quantity - 0.5, reserved_quantity = reserved_quantity - 0.5, updated_at = now()
- WHERE user_id = '<alice>' AND crypto_id = '<btc>';
-
+-- (d) settle: the reservation is released and the asset removed
+UPDATE holdings SET quantity = quantity - 0.1, reserved_quantity = reserved_quantity - 0.1, updated_at = now()
+ WHERE user_id = :alice AND crypto_id = :eth;
 SELECT quantity, reserved_quantity, quantity - reserved_quantity AS available
-  FROM holdings WHERE user_id = '<alice>' AND crypto_id = '<btc>';
+  FROM holdings WHERE user_id = :alice AND crypto_id = :eth;
 --  quantity | reserved_quantity | available
--- ----------+--------------------+-----------
---    1.5000 |             0.0000 |    1.5000
-
-COMMIT;
+-- ----------+-------------------+-----------
+--    0.2000 |            0.0000 |    0.2000
+ROLLBACK;
 ```
 
-This is the row that would stay visible to every other connection for as long
-as the order stayed `open` — i.e. for as long as it took a matcher to fill
-it, once limit orders exist.
+The middle state is what every other connection would see for as long as an order
+stayed `open` once limit orders exist: 0.1 ETH still owned but no longer free to sell.
 
-## Verified run — two concurrent sells, which is the bug itself
+## Two concurrent sells
 
-The scenario the design review described: a user should not be able to place
-two sell orders whose combined quantity exceeds what they actually hold. With
-Alice's BTC holding at 1.5 BTC (0 reserved), two independent CLI processes
-were started at the same instant, each selling `1.0 BTC` — together 2.0 BTC,
-more than she has:
+A Trader must not be able to sell the same units twice from two sessions at once. Both
+sessions may have listed the holding as free (step 2 runs outside the transaction), so
+the protection is statement (b): `SELECT ... FOR UPDATE` locks the holding row, and a
+second transaction that reaches (b) waits until the first one commits, then reads the
+already reduced `quantity` before deciding.
+
+This was checked with two `psql` sessions running statements (b)–(d) against alice's
+0.3 ETH. Session A locked the row, reserved and settled 0.2 ETH and committed after a
+3-second pause; session B asked for the lock one second after A had taken it:
 
 ```
-$ ( eduberza-sell-1.0-BTC ) &   # process A
-$ ( eduberza-sell-1.0-BTC ) &   # process B
-$ wait
-
-=== A ===
-Insufficient holding: trying to sell 1.0000, available 0.5000 (of 0.5000 held, 0.0000 reserved)
-=== B ===
-Order executed: sell 1.0000 BTC @ 67140.000000 (notional 67140.0000 USD)
-
-=== final holding ===
- quantity | reserved_quantity
-----------+--------------------
-   0.5000 |             0.0000
+A: SELECT ... FOR UPDATE  ->  quantity 0.3000, reserved_quantity 0.0000
+A: reserve 0.2, settle 0.2, pg_sleep(3)
+B: 11:43:54  SELECT ... FOR UPDATE   -- blocks, A holds the row lock
+A: 11:43:56  COMMIT
+B: 11:43:56  lock granted  ->  quantity 0.1000, reserved_quantity 0.0000
 ```
 
-One order settled, one was correctly rejected, and the final `quantity`
-(0.5) is consistent with exactly one 1.0 BTC sell having happened against the
-1.5 BTC available — not both, and not neither. This is enforced by the
-`SELECT ... FOR UPDATE` lock on the holdings row: whichever transaction gets
-there second blocks until the first commits, then re-reads the now-current
-`quantity`/`reserved_quantity` before deciding.
+Session B was blocked for the two seconds until A committed and then saw only
+0.1 ETH, so a second 0.2 ETH sell in B takes alternate flow 5a
+(`available 0.1000`) instead of selling units that no longer exist. (B was rolled
+back and alice's holding was restored to 0.3 ETH after the check.)
 
-## Verified — the constraint holds even if application code did not
+## The constraint holds even if the application code did not
 
-```sql
-UPDATE holdings SET reserved_quantity = quantity + 1 WHERE user_id = '<alice>' AND crypto_id = '<btc>';
+`schema_creation.sql` declares
+`CHECK (reserved_quantity >= 0 AND reserved_quantity <= quantity)` on
+`holdings.reserved_quantity`, so an inconsistent reservation is impossible at the
+database level, independently of `trade.go` (run inside a transaction that was
+rolled back):
 
+```
+UPDATE holdings SET reserved_quantity = quantity + 1 WHERE user_id = :alice AND crypto_id = :eth;
 ERROR:  new row for relation "holdings" violates check constraint "holdings_check"
 ```
-
-`CHECK (reserved_quantity >= 0 AND reserved_quantity <= quantity)` in
-`schema_creation.sql` makes an inconsistent reservation impossible at the
-database level, independent of `trade.go`.

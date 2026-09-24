@@ -10,18 +10,22 @@ import (
 
 // ShowBalance prints the logged-in user's balances.
 func ShowBalance(s *Session) {
-	var avail, invested float64
+	// P7 view v_trader_balances: cash is split into what is free and what
+	// is reserved by the user's open buy orders.
+	var avail, reserved, invested float64
 	err := db.DB.QueryRow(
-		`SELECT available_balance, invested_balance FROM users WHERE id = $1`,
+		`SELECT available_balance, reserved_balance, invested_balance
+		   FROM v_trader_balances WHERE user_id = $1`,
 		s.UserID,
-	).Scan(&avail, &invested)
+	).Scan(&avail, &reserved, &invested)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 	fmt.Printf("\n  Available: %.4f USD\n", avail)
+	fmt.Printf("  Reserved : %.4f USD (open buy orders)\n", reserved)
 	fmt.Printf("  Invested : %.4f USD\n", invested)
-	fmt.Printf("  Total    : %.4f USD\n", avail+invested)
+	fmt.Printf("  Total    : %.4f USD\n", avail+reserved+invested)
 }
 
 // Deposit - UC0003

@@ -83,6 +83,14 @@ func main() {
 			}
 			log.Printf("  %-8s  %.6f  qty=%.4f  side=%s", m.symbol, m.price, qty, side)
 		}
+		// P7 background job: the prices just moved, so fill any resting
+		// limit order the new market price has reached.
+		var filled int
+		if err := db.QueryRow(`SELECT fill_marketable_orders()`).Scan(&filled); err != nil {
+			log.Printf("fill_marketable_orders: %v", err)
+		} else if filled > 0 {
+			log.Printf("  filled %d resting limit order(s) at the new market price", filled)
+		}
 		time.Sleep(*interval)
 	}
 }

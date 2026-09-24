@@ -39,25 +39,37 @@ SELECT c.symbol, c.name, COALESCE(lp.price, 0)
 
 ### Add a crypto
 
-```sql
--- 1. resolve the symbol to a crypto_id
-SELECT id FROM project.crypto WHERE upper(symbol) = upper($1);
+The Trader picks the crypto by its number from the listed cryptos that are not on the watchlist yet:
 
--- 2. insert the item; do nothing if it's already there
+```sql
+-- 1. list, numbered, the cryptos not yet on the watchlist
+SELECT c.id, c.symbol, c.name
+  FROM project.crypto c
+ WHERE NOT EXISTS (SELECT 1 FROM project.watchlist_items wi
+                    WHERE wi.watchlist_id = $1 AND wi.crypto_id = c.id)
+ ORDER BY c.symbol;
+
+-- 2. insert the chosen crypto ($2 = its id from the list); do nothing if it's already there
 INSERT INTO project.watchlist_items (watchlist_id, crypto_id)
-VALUES ($watchlist_id, $crypto_id)
+VALUES ($1, $2)
 ON CONFLICT (watchlist_id, crypto_id) DO NOTHING;
 ```
 
 ### Remove a crypto
 
+The Trader picks the crypto by its number from the listed cryptos on the watchlist:
+
 ```sql
+-- 1. list, numbered, the cryptos on the watchlist
+SELECT c.id, c.symbol, c.name
+  FROM project.watchlist_items wi
+  JOIN project.crypto c ON c.id = wi.crypto_id
+ WHERE wi.watchlist_id = $1
+ ORDER BY c.symbol;
+
+-- 2. delete the chosen crypto ($2 = its id from the list)
 DELETE FROM project.watchlist_items
- WHERE watchlist_id = $1
-   AND crypto_id = (
-       SELECT id FROM project.crypto
-        WHERE upper(symbol) = upper($2)
-   );
+ WHERE watchlist_id = $1 AND crypto_id = $2;
 ```
 
-If the delete affects zero rows, system shows "Not in watchlist."
+If the entered number is not one of the listed numbers, system shows "Invalid choice, enter a number from 1 to N." and nothing is changed.

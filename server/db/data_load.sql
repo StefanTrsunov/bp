@@ -7,6 +7,13 @@
 -- not yet exist.
 --
 -- All sample users have the password: test123
+--
+-- One transaction: the P7 checks in advanced_db.sql compare balances with
+-- the ledger at COMMIT, and the users are inserted with their balances
+-- before the deposit rows that back them. In an auto-commit client
+-- (DBeaver) every statement would otherwise be checked on its own.
+
+BEGIN;
 
 SET search_path TO project, public;
 
@@ -103,11 +110,12 @@ INSERT INTO project.market_candles (market_id, timeframe, open, high, low, close
 -- EXAMPLE ORDERS, HOLDINGS AND TRANSACTIONS for alice
 -- Shows a fully-filled market buy and its resulting holding & ledger entry.
 -- ============================================================================
-INSERT INTO project.orders (id, user_id, market_id, side, type, status, quantity, price, placed_at, executed_at) VALUES
+-- Imported as already completely filled (filled_quantity = quantity).
+INSERT INTO project.orders (id, user_id, market_id, side, type, status, quantity, filled_quantity, price, placed_at, executed_at) VALUES
     ('c1111111-1111-1111-1111-111111111111',
      'b1111111-1111-1111-1111-111111111111',
      'a2222222-2222-2222-2222-222222222222',
-     'buy', 'market', 'executed', 0.5000, 3500.000000,
+     'buy', 'market', 'executed', 0.5000, 0.5000, 3500.000000,
      now() - interval '1 hour', now() - interval '1 hour');
 
 INSERT INTO project.holdings (user_id, crypto_id, quantity, avg_price, updated_at) VALUES
@@ -117,6 +125,10 @@ INSERT INTO project.holdings (user_id, crypto_id, quantity, avg_price, updated_a
 
 INSERT INTO project.transactions (user_id, type, amount, currency, related_order, description) VALUES
     ('b1111111-1111-1111-1111-111111111111', 'deposit',  10000.0000, 'USD', NULL,
+        'Initial virtual deposit'),
+    ('b2222222-2222-2222-2222-222222222222', 'deposit',   5000.0000, 'USD', NULL,
+        'Initial virtual deposit'),
+    ('b3333333-3333-3333-3333-333333333333', 'deposit',   2500.0000, 'USD', NULL,
         'Initial virtual deposit'),
     ('b1111111-1111-1111-1111-111111111111', 'buy',      -1750.0000, 'USD',
         'c1111111-1111-1111-1111-111111111111',
@@ -142,3 +154,5 @@ INSERT INTO project.watchlist_items (watchlist_id, crypto_id) VALUES
     ('d1111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444'),
     ('d2222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111'),
     ('d2222222-2222-2222-2222-222222222222', '55555555-5555-5555-5555-555555555555');
+
+COMMIT;

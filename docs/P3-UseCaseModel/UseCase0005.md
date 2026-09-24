@@ -25,9 +25,30 @@ one, not a schema change.
 ## Scenario
 
 1. Trader chooses "Place market SELL order".
-2. System lists markets (same SQL as UC0004 step 2).
-3. Trader enters market symbol and quantity.
-4. System resolves the market and looks up the latest price (same SQL as UC0004 step 4).
+2. System lists, numbered, the Trader's holdings that still have a quantity free to
+   sell (not reserved by an open sell order), with the quantity held, the free
+   quantity and the latest price:
+
+   ```sql
+   SELECT m.id, c.id, c.symbol, m.quote_currency,
+          h.quantity, h.quantity - h.reserved_quantity AS free,
+          COALESCE(lp.price, 0) AS price
+     FROM project.holdings h
+     JOIN project.crypto  c ON c.id = h.crypto_id
+     JOIN project.markets m ON m.crypto_id = c.id AND m.is_active = true
+     LEFT JOIN project.v_latest_prices lp ON lp.market_id = m.id
+    WHERE h.user_id = $1
+      AND h.quantity - h.reserved_quantity > 0
+    ORDER BY c.symbol;
+   ```
+3. Trader picks the holding by its number in the listed holdings, e.g. `2` (ETH), and
+   enters the quantity.
+4. System takes the chosen row's market id and crypto id from the list (no lookup by
+   symbol) and looks up the latest price:
+
+   ```sql
+   SELECT price FROM project.v_latest_prices WHERE market_id = $1;
+   ```
 5. System opens a transaction:
 
    ```sql

@@ -87,48 +87,105 @@ func listWatchlist(wlID string) {
 	}
 }
 
+// addToWatchlist lists the cryptos that are not on the watchlist yet,
+// numbered, and adds the one the user picks.
 func addToWatchlist(wlID string) {
-	sym := prompt("Crypto symbol to add: ")
-	var cryptoID string
-	err := db.DB.QueryRow(
-		`SELECT id FROM crypto WHERE upper(symbol) = upper($1)`, sym,
-	).Scan(&cryptoID)
-	if err == sql.ErrNoRows {
-		fmt.Println("Unknown crypto symbol.")
-		return
-	}
+	rows, err := db.DB.Query(`
+		SELECT c.id, c.symbol, c.name
+		  FROM crypto c
+		 WHERE NOT EXISTS (SELECT 1 FROM watchlist_items wi
+		                    WHERE wi.watchlist_id = $1 AND wi.crypto_id = c.id)
+		 ORDER BY c.symbol`, wlID)
 	if err != nil {
 		fmt.Println("Error:", err)
+		return
+	}
+	type option struct{ id, symbol, name string }
+	var list []option
+	for rows.Next() {
+		var o option
+		if err := rows.Scan(&o.id, &o.symbol, &o.name); err != nil {
+			rows.Close()
+			fmt.Println("scan error:", err)
+			return
+		}
+		list = append(list, o)
+	}
+	rows.Close()
+	if len(list) == 0 {
+		fmt.Println("Every crypto is already on your watchlist.")
+		return
+	}
+	fmt.Println()
+	fmt.Printf("  %-4s  %-8s  %s\n", "#", "Symbol", "Name")
+	fmt.Println("  ------------------------------")
+	for i, o := range list {
+		fmt.Printf("  %-4d  %-8s  %s\n", i+1, o.symbol, o.name)
+	}
+	k, err := pickNumber("Crypto # to add: ", len(list))
+	if err != nil {
+		fmt.Println(err)
 		return
 	}
 	_, err = db.DB.Exec(
 		`INSERT INTO watchlist_items (watchlist_id, crypto_id)
 		 VALUES ($1, $2)
 		 ON CONFLICT (watchlist_id, crypto_id) DO NOTHING`,
-		wlID, cryptoID,
+		wlID, list[k].id,
 	)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-	fmt.Println("Added.")
+	fmt.Printf("Added %s.\n", list[k].symbol)
 }
 
+// removeFromWatchlist lists the watchlist's cryptos, numbered, and removes
+// the one the user picks.
 func removeFromWatchlist(wlID string) {
-	sym := prompt("Crypto symbol to remove: ")
-	res, err := db.DB.Exec(`
-		DELETE FROM watchlist_items
-		 WHERE watchlist_id = $1
-		   AND crypto_id = (SELECT id FROM crypto WHERE upper(symbol) = upper($2))`,
-		wlID, sym)
+	rows, err := db.DB.Query(`
+		SELECT c.id, c.symbol, c.name
+		  FROM watchlist_items wi
+		  JOIN crypto c ON c.id = wi.crypto_id
+		 WHERE wi.watchlist_id = $1
+		 ORDER BY c.symbol`, wlID)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		fmt.Println("Not in watchlist.")
+	type option struct{ id, symbol, name string }
+	var list []option
+	for rows.Next() {
+		var o option
+		if err := rows.Scan(&o.id, &o.symbol, &o.name); err != nil {
+			rows.Close()
+			fmt.Println("scan error:", err)
+			return
+		}
+		list = append(list, o)
+	}
+	rows.Close()
+	if len(list) == 0 {
+		fmt.Println("Your watchlist is empty.")
 		return
 	}
-	fmt.Println("Removed.")
+	fmt.Println()
+	fmt.Printf("  %-4s  %-8s  %s\n", "#", "Symbol", "Name")
+	fmt.Println("  ------------------------------")
+	for i, o := range list {
+		fmt.Printf("  %-4d  %-8s  %s\n", i+1, o.symbol, o.name)
+	}
+	k, err := pickNumber("Crypto # to remove: ", len(list))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if _, err := db.DB.Exec(
+		`DELETE FROM watchlist_items WHERE watchlist_id = $1 AND crypto_id = $2`,
+		wlID, list[k].id,
+	); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Printf("Removed %s.\n", list[k].symbol)
 }

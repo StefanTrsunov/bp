@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 
 	"bp_project/server/db"
 )
@@ -15,10 +16,11 @@ type Market struct {
 	Quote    string
 }
 
-// ListMarkets prints all active markets with their latest price.
-func ListMarkets() {
+// ListMarkets prints all active markets, numbered, with their latest price,
+// and returns them in the printed order so a caller can pick one by number.
+func ListMarkets() []Market {
 	rows, err := db.DB.Query(`
-		SELECT m.id, c.symbol, m.quote_currency,
+		SELECT m.id, c.id, c.symbol, m.quote_currency,
 		       COALESCE(lp.price, 0) AS price
 		  FROM markets m
 		  JOIN crypto  c  ON c.id = m.crypto_id
@@ -27,49 +29,91 @@ func ListMarkets() {
 		 ORDER BY c.symbol`)
 	if err != nil {
 		fmt.Println("Error:", err)
-		return
+		return nil
 	}
 	defer rows.Close()
 
 	fmt.Println()
 	fmt.Printf("  %-4s  %-8s  %-5s  %15s\n", "#", "Symbol", "Quote", "Last price")
 	fmt.Println("  -----------------------------------------")
-	i := 1
+	var list []Market
 	for rows.Next() {
-		var id, sym, quote string
+		var m Market
 		var price float64
-		if err := rows.Scan(&id, &sym, &quote, &price); err != nil {
+		if err := rows.Scan(&m.ID, &m.CryptoID, &m.Symbol, &m.Quote, &price); err != nil {
 			fmt.Println("scan error:", err)
-			return
+			return nil
 		}
-		fmt.Printf("  %-4d  %-8s  %-5s  %15.6f\n", i, sym, quote, price)
-		i++
+		list = append(list, m)
+		fmt.Printf("  %-4d  %-8s  %-5s  %15.6f\n", len(list), m.Symbol, m.Quote, price)
 	}
+	return list
 }
 
-// ChooseMarket asks the user to pick a market by symbol and returns it.
+// pickNumber reads a 1-based choice from a list of n items.
+func pickNumber(label string, n int) (int, error) {
+	if n == 0 {
+		return 0, fmt.Errorf("Nothing to choose from.")
+	}
+	k, err := strconv.Atoi(prompt(label))
+	if err != nil || k < 1 || k > n {
+		return 0, fmt.Errorf("Invalid choice, enter a number from 1 to %d.", n)
+	}
+	return k - 1, nil
+}
+
+// ChooseMarket lists the active markets and lets the user pick one by its
+// number in the list.
 func ChooseMarket() (*Market, error) {
-	ListMarkets()
-	sym := prompt("Market symbol (e.g. BTC): ")
-	if sym == "" {
-		return nil, fmt.Errorf("no symbol entered")
-	}
-	var m Market
-	err := db.DB.QueryRow(`
-		SELECT m.id, c.id, c.symbol, m.quote_currency
-		  FROM markets m
-		  JOIN crypto c ON c.id = m.crypto_id
-		 WHERE upper(c.symbol) = upper($1)
-		   AND m.is_active = true
-		 LIMIT 1`, sym,
-	).Scan(&m.ID, &m.CryptoID, &m.Symbol, &m.Quote)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("market %s not found", sym)
-	}
+	list := ListMarkets()
+	k, err := pickNumber("Market #: ", len(list))
 	if err != nil {
 		return nil, err
 	}
-	return &m, nil
+	return &list[k], nil
+}
+
+// ChooseHolding lists only the markets the user can sell in — cryptos they
+// hold with some quantity still free (not reserved by an open sell order) —
+// with how much is held and free, and lets them pick one by number.
+func ChooseHolding(s *Session) (*Market, error) {
+	rows, err := db.DB.Query(`
+		SELECT m.id, c.id, c.symbol, m.quote_currency,
+		       h.quantity, h.quantity - h.reserved_quantity AS free,
+		       COALESCE(lp.price, 0) AS price
+		  FROM holdings h
+		  JOIN crypto  c ON c.id = h.crypto_id
+		  JOIN markets m ON m.crypto_id = c.id AND m.is_active = true
+		  LEFT JOIN v_latest_prices lp ON lp.market_id = m.id
+		 WHERE h.user_id = $1
+		   AND h.quantity - h.reserved_quantity > 0
+		 ORDER BY c.symbol`, s.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fmt.Println()
+	fmt.Printf("  %-4s  %-8s  %-5s  %12s  %12s  %15s\n", "#", "Symbol", "Quote", "Held", "Free to sell", "Last price")
+	fmt.Println("  -------------------------------------------------------------------")
+	var list []Market
+	for rows.Next() {
+		var m Market
+		var held, free, price float64
+		if err := rows.Scan(&m.ID, &m.CryptoID, &m.Symbol, &m.Quote, &held, &free, &price); err != nil {
+			return nil, err
+		}
+		list = append(list, m)
+		fmt.Printf("  %-4d  %-8s  %-5s  %12.4f  %12.4f  %15.6f\n", len(list), m.Symbol, m.Quote, held, free, price)
+	}
+	if len(list) == 0 {
+		return nil, fmt.Errorf("you hold no crypto that is free to sell")
+	}
+	k, err := pickNumber("Holding #: ", len(list))
+	if err != nil {
+		return nil, err
+	}
+	return &list[k], nil
 }
 
 // LatestPrice returns the last traded price on a market.

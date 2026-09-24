@@ -147,7 +147,7 @@ way, so the result is equivalent in substance:
 1. Connect to the project database.
 2. Right-click the database → **ERD For Database** (or open a blank ERD and drag
    the `project` tables in).
-3. Arrange the tables to mirror `ERModel_v01.png`.
+3. Arrange the tables to mirror `ERModel_v03.png`.
 4. **Download image** → PNG, then convert:
    `convert relational_schema.png relational_schema.jpg`
 

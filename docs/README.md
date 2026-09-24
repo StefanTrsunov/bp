@@ -42,6 +42,7 @@ that documents them.
 | `P4-Prototype/`         | P4 | `PrototypeImplementation`, `UseCase000XImplementation`, `BuildInstructions`, `PrototypeImplementationAIUsage` |
 | `P5-Normalization/`     | P5 | `Normalization`, `NormalizationAIUsage` |
 | `P6-AdvancedReports/`   | P6 | `AdvancedReports`, `AdvancedReportsAIUsage` |
+| `P7-AdvancedDatabaseDevelopment/` | P7 | `AdvancedDatabaseDevelopment`, `AdvancedDatabaseDevelopmentAIUsage` |
 
 `Instructions.md` is the condensed course rubric — reference material, not a
 submission. `P0-ProjectDefinition/opis.md` and `P1-ConceptualModel/ep-diagram.md`
@@ -64,7 +65,7 @@ The two SQL scripts deliberately stay in `server/db/` rather than moving into
 | P4 | [PrototypeImplementation](P4-Prototype/PrototypeImplementation.md) | Finished, awaiting approval |
 | P5 | [Normalization](P5-Normalization/Normalization.md) | Finished, awaiting approval |
 | P6 | [AdvancedReports](P6-AdvancedReports/AdvancedReports.md) | Finished, awaiting approval |
-| P7 | *Advanced Database Development* | Not started |
+| P7 | [AdvancedDatabaseDevelopment](P7-AdvancedDatabaseDevelopment/AdvancedDatabaseDevelopment.md) | Finished, awaiting approval |
 | P8 | *Advanced Application Development* | Not started |
 | P9 | *Other topics (Performance, Security)* | Not started |
 
@@ -88,6 +89,8 @@ required. P5 is the recommended next one.
 | [`../server/db/data_load.sql`](../server/db/data_load.sql) | P2 | DML — truncates and reloads sample data |
 | [`relational_schema.jpg`](P2-RelationalDesign/relational_schema.jpg) | P2 | Crow's-foot diagram exported from DBeaver |
 | [`../server/db/reports_demo_data.sql`](../server/db/reports_demo_data.sql) | P6 | Optional multi-quarter demo data for the two reports (not part of `-init`) |
+| [`../server/db/advanced_db.sql`](../server/db/advanced_db.sql) | P7 | Triggers, functions, views and the background job (part of `-init`) |
+| [`../server/db/advanced_db_tests.sql`](../server/db/advanced_db_tests.sql) | P7 | Tests for every P7 rule, rolled back at the end |
 
 ## Use cases (P3)
 
@@ -108,6 +111,9 @@ one because AI use is forbidden there.
 - [RelationalDesignAIUsage](P2-RelationalDesign/RelationalDesignAIUsage.md) (P2)
 - [UseCaseModelAIUsage](P3-UseCaseModel/UseCaseModelAIUsage.md) (P3)
 - [PrototypeImplementationAIUsage](P4-Prototype/PrototypeImplementationAIUsage.md) (P4)
+- [NormalizationAIUsage](P5-Normalization/NormalizationAIUsage.md) (P5)
+- [AdvancedReportsAIUsage](P6-AdvancedReports/AdvancedReportsAIUsage.md) (P6)
+- [AdvancedDatabaseDevelopmentAIUsage](P7-AdvancedDatabaseDevelopment/AdvancedDatabaseDevelopmentAIUsage.md) (P7)
 
 ## Build & run
 
