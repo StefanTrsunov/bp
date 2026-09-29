@@ -12,7 +12,7 @@ It is linked from [PrototypeImplementation](PrototypeImplementation.md).
 | Docker + Docker Compose | any recent | Optional. Starts a local PostgreSQL with one command. |
 | `psql`      | 16                    | Optional. Only for running the SQL scripts by hand.            |
 | Java        | 21 (8+ works)         | Optional. Only to open or edit the ER diagram in TerraER.      |
-| DBeaver     | any recent            | Optional. Only to export `relational_schema.jpg`.              |
+| DBeaver     | any recent            | Optional. Only to export `relational_diagram_v4.png`.             |
 
 About the PostgreSQL version: `docker-compose.yml` uses the image `postgres` without a version
 tag. Docker therefore starts whatever version of the official image it has pulled. On the
@@ -243,10 +243,10 @@ TerraER is a third-party tool and is **not** committed to this repository on pur
 the teacher's build from <https://bazi.finki.ukim.mk/resources/Software/> and run it:
 
 ```sh
-java -jar TerraER3.11.jar     # then File → Open → docs/P1-ConceptualModel/ERModel_v03.xml
+java -jar TerraER3.11.jar     # then File → Open → docs/P1-ConceptualModel/ERModel_v05.xml
 ```
 
-The current version is `ERModel_v03.xml`. Save new versions as `ERModel_v04.xml` and so on,
+The current version is `ERModel_v05.xml`. Save new versions as `ERModel_v06.xml` and so on,
 and export a matching PNG for each. TerraER does not add the extension itself: type `.xml`
 yourself, or the file will not reopen.
 

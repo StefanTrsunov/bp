@@ -29,8 +29,8 @@ is flat** — when you publish, each file becomes a page named exactly after the
 file, with no folder prefix and with capitalisation preserved: `About`,
 `ERModel`, `RelationalDesign`, `UseCaseModel`, `UseCase0001`, …,
 `PrototypeImplementation`, `BuildInstructions`, and the four `*AIUsage` pages.
-Attachments (`ERModel_v01.xml`, `ERModel_v01.png`, `schema_creation.sql`,
-`data_load.sql`, `relational_schema.jpg`, the screenshots) attach to the page
+Attachments (`ERModel_v05.xml`, `ERModel_v05.png`, `schema_creation.sql`,
+`data_load.sql`, `relational_diagram_v4.png`, the screenshots) attach to the page
 that documents them.
 
 | Folder | Phase | Wiki pages produced |
@@ -79,15 +79,17 @@ required. P5 is the recommended next one.
 
 | File | Phase | What |
 |------|-------|------|
-| [`ERModel_v03.xml`](P1-ConceptualModel/ERModel_v03.xml) | P1 | TerraER source, current version |
-| [`ERModel_v03.png`](P1-ConceptualModel/ERModel_v03.png) | P1 | Exported diagram image, current version |
+| [`ERModel_v05.xml`](P1-ConceptualModel/ERModel_v05.xml) | P1 | TerraER source, current version |
+| [`ERModel_v05.png`](P1-ConceptualModel/ERModel_v05.png) | P1 | Exported diagram image, current version |
+| [`ERModel_v04.xml`](P1-ConceptualModel/ERModel_v04.xml), [`ERModel_v03.xml`](P1-ConceptualModel/ERModel_v03.xml) | P1 | TerraER source, previous versions (kept per P1 rules) |
+| [`ERModel_v04.png`](P1-ConceptualModel/ERModel_v04.png), [`ERModel_v03.png`](P1-ConceptualModel/ERModel_v03.png) | P1 | Exported diagram images, previous versions |
 | [`ERModel_v02.xml`](P1-ConceptualModel/ERModel_v02.xml) | P1 | TerraER source, previous version (kept per P1 rules) |
 | [`ERModel_v02.png`](P1-ConceptualModel/ERModel_v02.png) | P1 | Exported diagram image, previous version |
 | [`ERModel_v01.xml`](P1-ConceptualModel/ERModel_v01.xml) | P1 | TerraER source, first version (kept per P1 rules) |
 | [`ERModel_v01.png`](P1-ConceptualModel/ERModel_v01.png) | P1 | Exported diagram image, first version |
 | [`../server/db/schema_creation.sql`](../server/db/schema_creation.sql) | P2 | DDL — drops and recreates the `project` schema |
 | [`../server/db/data_load.sql`](../server/db/data_load.sql) | P2 | DML — truncates and reloads sample data |
-| [`relational_schema.jpg`](P2-RelationalDesign/relational_schema.jpg) | P2 | Crow's-foot diagram exported from DBeaver |
+| [`relational_diagram_v4.png`](P2-RelationalDesign/relational_diagram_v4.png) | P2 | Relational diagram exported from DBeaver, laid out like `ERModel_v05.png` |
 | [`../server/db/reports_demo_data.sql`](../server/db/reports_demo_data.sql) | P6 | Optional multi-quarter demo data for the two reports (not part of `-init`) |
 | [`../server/db/advanced_db.sql`](../server/db/advanced_db.sql) | P7 | Triggers, functions, views and the background job (part of `-init`) |
 | [`../server/db/advanced_db_tests.sql`](../server/db/advanced_db_tests.sql) | P7 | Tests for every P7 rule, rolled back at the end |

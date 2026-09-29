@@ -12,7 +12,8 @@
 
 === Diagram ===
 
-`ERModel_v01.xml` / `ERModel_v01.png`.
+Current version: `ERModel_v05.xml` / `ERModel_v05.png` (see session 5 below). First
+version: `ERModel_v01.xml` / `ERModel_v01.png`.
 
 '''Declaration of how the diagram was produced.''' The initial model is the
 student's own: the entity and attribute list in `ep-diagram.md`,
@@ -304,3 +305,23 @@ white `(255,255,255)`, matching `ERModel_v02.png`.
 
 '''What I decided:''' to add the P7 structure to the ER model. The new elements are placed
 automatically, so the layout can be tidied by hand in TerraER.
+
+=== Session 5 — 2026-09-29 (Claude Opus 5.5): v05, correction after review ===
+
+'''Prompt (student, excerpt):''' I pasted the reviewer's comments that `Holds` and `Contains`
+are implemented differently in the database than in the model, with the suggestion to
+"correct only the Phase 1 model so that it matches Phase 2", and asked:
+
+> Can you take a look at this stuff? and fix them, but don't push anything just make the
+> changes requested and try to explain it to me to see if you understand the problem with
+> the solution
+
+'''Response (AI, summarised):'''
+
+ * Explained that an M:N relationship has no identifier of its own, while `holdings` and `watchlist_items` each have an `id` primary key, so the database treats them as entity sets.
+ * Changed the model to v05. `Holdings` (`id`, `quantity`, `reserved_quantity`, derived `avg_price`, `created_at`, `updated_at`) and `WatchlistItems` (`id`, `added_at`) became entity sets, with the 1:N relationships `Holds`, `PositionIn`, `Contains` and `Lists`, each total on the new entity's side. The old relationship keys are now stated as uniqueness rules. The key descriptions no longer name foreign-key columns.
+ * Generated `ERModel_v05.xml` / `ERModel_v05.png` from scratch with TerraER 3.11's own figure classes and writer (adapted from the v01 generator), on a grid, with no overlapping attributes. It was verified by reading the file back with TerraER's reader (184 figures) and by inspecting the rendered PNG.
+ * Updated [wiki:ERModel] (v05 sections and history entry).
+
+'''What I decided:''' to follow the reviewer's advice and change the model rather than the
+database, since every later phase already uses the database as it is.

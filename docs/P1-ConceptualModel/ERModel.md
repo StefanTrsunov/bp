@@ -1,8 +1,8 @@
-# Entity-Relationship Model v.04
+# Entity-Relationship Model v.05
 
 ## Diagram
 
-![ERModel_v04](ERModel_v04.png)
+![ERModel_v05](ERModel_v05.png)
 
 Notation: Chen. Rectangles are entity sets, diamonds are relationships, ellipses
 are attributes, underlined ellipses are primary keys, the dashed ellipse is a
@@ -10,14 +10,24 @@ derived attribute. A double line between an entity set and a relationship marks
 **total participation** (every instance of that entity set must participate); a
 single line marks partial participation.
 
-Two deliberate modeling decisions worth stating up front:
+Three deliberate modeling decisions worth stating up front:
 
 - **No foreign keys appear in the diagram.** Connections between entity sets are
   expressed as relationships, per the notation. Foreign-key columns appear only
   in the relational model in [RelationalDesign](../P2-RelationalDesign/RelationalDesign.md).
-- **`Holds` and `Contains` are relationships, not entity sets.** Both are M:N and
-  both carry their own attributes, which is exactly what a Chen relationship is
-  for. They become tables (`holdings`, `watchlist_items`) only in P2.
+- **A position and a watchlist entry are entity sets, not M:N relationships.**
+  `Holdings` (a user's position in an asset) and `WatchlistItems` (an asset on a
+  watchlist) each have their own identifier `id`, and each is connected by two
+  1:N relationships: `Holds` and `PositionIn` for a holding, `Contains` and
+  `Lists` for a watchlist item. Until v04 they were drawn as the M:N
+  relationships `Holds` and `Contains`, but the database has always given
+  `holdings` and `watchlist_items` their own `id` primary key. That is how an
+  entity set is implemented, not an M:N relationship, whose key would be the
+  pair of participating keys. v05 corrects the model to match; see
+  [history](#entity-relationship-model-history).
+- **Key and uniqueness rules are stated with entity and relationship names,
+  never with foreign-key columns.** For example: "a crypto is quoted at most
+  once per currency", not "`{crypto_id, quote_currency}` is unique".
 
 ## Data requirements
 
@@ -45,7 +55,7 @@ propagate changes across the whole database.
 |---|---|---|
 | `id` | UUID | PK, required |
 | `username` | text(50) | required, unique |
-| `email` | text(255) | required, unique, contains `@` |
+| `email` | text(255) | required, unique, contains `@` (checked by the application at registration, not by a database constraint) |
 | `full_name` | text(200) | optional |
 | `password_hash` | text(255) | required — never the password itself; the prototype stores a SHA-256 hex digest |
 | `available_balance` | numeric(18,4) | required, default 0, ≥ 0 |
@@ -78,10 +88,12 @@ own entity set rather than an attribute of `Cryptos` because a market has its ow
 lifecycle — it can be deactivated without deleting the asset — and because
 trades, candles and orders all reference the pair, not the asset.
 
-**Keys:** candidates `{id}`, `{crypto_id, quote_currency}` — that pair is
-unique by definition, since a given asset can only be quoted once per
-currency; primary key **`id`**, so that the many entity sets referencing a
-market carry one narrow column instead of a composite key.
+**Keys:** candidate `{id}`; primary key **`id`**, so that the many entity sets
+related to a market need one narrow identifier instead of a composite one.
+**Uniqueness rule:** a crypto is quoted at most once per currency, so the crypto
+a market is `QuotedOn` together with its `quote_currency` identifies the market
+as well. Chen notation cannot draw this, because half of it comes through a
+relationship. P2 enforces it as `UNIQUE(crypto_id, quote_currency)`.
 
 | Attribute | Type | Constraints |
 |---|---|---|
@@ -97,7 +109,7 @@ the requested quantity and price even after it has been filled, which is what
 makes the ledger auditable.
 
 Placing an order is what triggers a **reservation** of whatever it commits:
-the crypto being sold (`Holds.reserved_quantity`, below) on a sell, and the
+the crypto being sold (`Holdings.reserved_quantity`, below) on a sell, and the
 cash (`Users.reserved_balance`) on a buy. Since v04 (after P7) an order can
 wait in the order book and be filled in parts, so `status` is a real
 lifecycle driven by `filled_quantity`: `open` (nothing filled yet),
@@ -120,7 +132,7 @@ are legitimately distinct; primary key **`id`**.
 | `status` | text | required, `open`, `partially_filled`, `executed` or `cancelled` |
 | `quantity` | numeric(20,4) | required, > 0 |
 | `filled_quantity` | numeric(20,4) | required, default 0, between 0 and `quantity` — how much has been traded; remaining = `quantity − filled_quantity` (added in v04, after P7) |
-| `price` | numeric(18,6) | the limit price; for a market order, the market price when it was placed |
+| `price` | numeric(18,6) | optional — the limit price; for a market order, the market price when it was placed |
 | `placed_at` | timestamptz | required, defaults to now |
 | `executed_at` | timestamptz | optional, set when the order settles |
 
@@ -147,15 +159,15 @@ market simulator. This is the single source of truth for the current price: the
 price of a market is the price of its most recent trade, never a column someone
 writes directly.
 
-**Keys:** candidate `{id}` — `{market_id, executed_at}` looks unique in
-principle, but two trades can share a timestamp, so it is not a safe key;
+**Keys:** candidate `{id}` — "market plus `executed_at`" looks unique in
+principle, but two trades on a market can share a timestamp, so it is not a safe key;
 primary key **`id`** (a plain auto-incrementing integer here rather than a
 UUID, because this is the highest-volume entity set and it is only ever read
 in timestamp order, never referenced by anything else).
 
 | Attribute | Type | Constraints |
 |---|---|---|
-| `id` | integer | PK, required, auto-generated |
+| `id` | big integer | PK, required, auto-generated (`bigserial` in P2) |
 | `executed_at` | timestamptz | required |
 | `price` | numeric(18,6) | required, > 0 |
 | `quantity` | numeric(20,6) | required, > 0 |
@@ -176,12 +188,12 @@ integer, events are only read in order).
 
 | Attribute | Type | Constraints |
 |---|---|---|
-| `id` | integer | PK, required, auto-generated |
+| `id` | big integer | PK, required, auto-generated (`bigserial` in P2) |
 | `event_type` | text | required, `placed`, `partially_filled`, `filled` or `cancelled` |
 | `quantity` | numeric(20,4) | required — the ordered quantity for `placed`, the filled amount for a fill, the unfilled rest for `cancelled` |
 | `price` | numeric(18,6) | optional — the order price, or the trade price for a fill |
 | `status_after` | text | required, the order's status after the event |
-| `created_at` | timestamptz | required, defaults to now |
+| `created_at` | timestamptz | required, set automatically when the event is recorded (`clock_timestamp()`, so events inside one transaction keep their real order) |
 
 #### MarketCandles
 OHLCV aggregates per market and timeframe — the data a price chart is drawn
@@ -189,14 +201,15 @@ from. Stored rather than computed on the fly because the point of the project is
 a chart-driven interface, and re-aggregating the whole trade history for every
 screen refresh does not scale.
 
-**Keys:** candidates `{id}`, `{market_id, timeframe, candle_time}` — a market
-has exactly one candle per timeframe per time bucket; primary key **`id`**, the
-composite is enforced as a uniqueness rule because it is the real-world
-constraint and it is what prevents duplicate candles.
+**Keys:** candidate `{id}`; primary key **`id`**. **Uniqueness rule:** a market
+has exactly one candle per timeframe per time bucket, so the market a candle
+`Aggregates` together with `timeframe` and `candle_time` also identifies it.
+This is the real-world constraint that prevents duplicate candles. P2 enforces
+it as `UNIQUE(market_id, timeframe, candle_time)`.
 
 | Attribute | Type | Constraints |
 |---|---|---|
-| `id` | integer | PK, required, auto-generated |
+| `id` | big integer | PK, required, auto-generated (`bigserial` in P2) |
 | `timeframe` | text | required, `1m`, `5m`, `1h` or `1d` |
 | `open`, `high`, `low`, `close` | numeric(18,6) | all required |
 | `volume` | numeric(20,6) | required |
@@ -207,15 +220,62 @@ A named list of assets a user wants to monitor. A separate entity set rather tha
 a flag on the relationship between users and assets, because a user may want
 several lists ("long term", "watching today") and each needs its own name.
 
-**Keys:** candidate `{id}` — `{user_id, name}` would also work if list names
-were required to be unique per user, which the model does not impose, so it is
-not listed as a candidate key; primary key **`id`**.
+**Keys:** candidate `{id}`; primary key **`id`**. "Owner plus `name`" would
+also identify a list if names had to be unique per user, but the model does
+not require that, so there is no uniqueness rule here.
 
 | Attribute | Type | Constraints |
 |---|---|---|
 | `id` | UUID | PK, required |
 | `name` | text(100) | required |
 | `created_at` | timestamptz | required, defaults to now |
+
+#### Holdings
+A user's position in one crypto asset: how much of it the user owns, how much
+of that is already promised to open sell orders, and at what average price it
+was accumulated. *An entity set since v05* (until v04 it was the M:N
+relationship `Holds`). A holding has its own identifier and its own
+lifecycle: it is created on the first buy, updated on every later fill, and
+the prototype reads and locks it as a unit (`SELECT … FOR UPDATE` on the sell
+path). It is linked to its owner through `Holds` and to its asset through
+`PositionIn`.
+
+**Keys:** candidate `{id}`; primary key **`id`**. **Uniqueness rule:** a user
+has at most one holding per crypto, so the user who `Holds` it together with
+the crypto it is a `PositionIn` also identifies a holding. P2 enforces this as
+`UNIQUE(user_id, crypto_id)`.
+
+`reserved_quantity` mirrors `available_balance`/`invested_balance` on `Users`:
+two independently updated stored numbers, with the amount actually free to use
+computed on demand rather than stored (`quantity − reserved_quantity` here,
+`available_balance` alone on the cash side). Without it, nothing stopped a
+user from placing a second sell order against crypto already promised to a
+first one — `quantity` alone cannot tell "owned" apart from "owned, but
+already committed elsewhere." See [history](#entity-relationship-model-history), v03.
+
+| Attribute | Type | Constraints |
+|---|---|---|
+| `id` | UUID | PK, required |
+| `quantity` | numeric(20,4) | required, ≥ 0 — total amount owned |
+| `reserved_quantity` | numeric(20,4) | required, default 0, `0 ≤ reserved_quantity ≤ quantity` — committed to the user's own open sell orders, not yet removed from the position |
+| `avg_price` | numeric(18,6) | required, default 0, ≥ 0, **derived** (dashed ellipse) — the weighted average of the prices at which the position was accumulated; derivable from the buy history, stored anyway so unrealised P/L can be shown without replaying the whole ledger |
+| `created_at` | timestamptz | required, defaults to now |
+| `updated_at` | timestamptz | optional |
+
+#### WatchlistItems
+One asset placed on one watchlist. *An entity set since v05* (until v04 it was
+the M:N relationship `Contains`). It has its own identifier, and it is linked
+to its list through `Contains` and to its asset through `Lists`.
+
+**Keys:** candidate `{id}`; primary key **`id`**. **Uniqueness rule:** an asset
+appears at most once on a given list, so the watchlist that `Contains` an item
+together with the crypto it `Lists` also identifies the item. P2 enforces this
+as `UNIQUE(watchlist_id, crypto_id)`.
+
+| Attribute | Type | Constraints |
+|---|---|---|
+| `id` | UUID | PK, required |
+| `added_at` | timestamptz | required, defaults to now — recorded so a list can be shown in the order the user built it |
 
 ### Relationships
 
@@ -249,12 +309,13 @@ Every executed trade happened on exactly one market. No attributes.
 #### FillsBuy — Orders (1) : MarketTrades (N), partial on both sides
 *Added in v04, after P7.* The buy order a trade filled. An order can be
 filled by many trades (partial fills); a trade fills at most one buy order,
-and none when the simulated market was the buyer. No attributes.
+and none when the simulated market was the buyer. The role of `Orders` in this
+relationship is *the buy order* of the trade. No attributes.
 
 #### FillsSell — Orders (1) : MarketTrades (N), partial on both sides
 *Added in v04, after P7.* The sell order a trade filled, symmetric to
-`FillsBuy`. A trade between two users' orders participates in both. No
-attributes.
+`FillsBuy`; the role of `Orders` here is *the sell order* of the trade. A
+trade between two users' orders participates in both. No attributes.
 
 #### Logs — Orders (1) : OrderEvents (N), total on OrderEvents
 *Added in v04, after P7.* Every event belongs to exactly one order. No
@@ -266,37 +327,27 @@ Every candle summarises trades of exactly one market. No attributes.
 #### Owns — Users (1) : Watchlists (N), total on Watchlists
 Every watchlist belongs to exactly one user. No attributes.
 
-#### Holds — Users (M) : Cryptos (N), partial on both sides, **with attributes**
-A user's position in an asset. M:N because one user holds many assets and one
-asset is held by many users, and partial on both sides because a user may hold
-nothing and an asset may be held by nobody. Modeled as a relationship rather
-than an entity set because a position has no identity of its own — it is
-entirely described by *which user*, *which asset*, and how much.
+#### Holds — Users (1) : Holdings (N), total on Holdings
+*1:N since v05.* Every holding belongs to exactly one user. A user may hold
+nothing yet, so participation is partial on the `Users` side. No attributes.
 
-`reserved_quantity` mirrors `available_balance`/`invested_balance` on `Users`:
-two independently updated stored numbers, with the amount actually free to use
-computed on demand rather than stored (`quantity − reserved_quantity` here,
-`available_balance` alone on the cash side). Without it, nothing stopped a
-user from placing a second sell order against crypto already promised to a
-first one — `quantity` alone cannot tell "owned" apart from "owned, but
-already committed elsewhere." See [history](#entity-relationship-model-history), v03.
+#### PositionIn — Cryptos (1) : Holdings (N), total on Holdings
+*Added in v05.* Every holding is a position in exactly one crypto asset. An
+asset may be held by nobody. No attributes.
 
-| Attribute | Type | Constraints |
-|---|---|---|
-| `quantity` | numeric(20,4) | required, ≥ 0 — total amount owned |
-| `reserved_quantity` | numeric(20,4) | required, default 0, `0 ≤ reserved_quantity ≤ quantity` — committed to the user's own open sell orders, not yet removed from the position |
-| `avg_price` | numeric(18,6) | required, ≥ 0, **derived** (dashed ellipse) — the weighted average of the prices at which the position was accumulated; derivable from the buy history, stored anyway so unrealised P/L can be shown without replaying the whole ledger |
-| `created_at` | timestamptz | required, defaults to now |
-| `updated_at` | timestamptz | optional |
+Together, `Holds` and `PositionIn` still say what the old M:N `Holds` said:
+a user can hold many assets and an asset can be held by many users. The
+difference is that the position is now a thing with its own identity, not
+just a pair. The rule "at most one holding per user and crypto" is stated
+under [Holdings](#holdings).
 
-#### Contains — Watchlists (M) : Cryptos (N), partial on both sides, **with attribute**
-Which assets are on which watchlist. M:N: a list holds many assets, an asset
-appears on many lists. Partial on both sides — an empty list is valid and an
-asset need not be on any list.
+#### Contains — Watchlists (1) : WatchlistItems (N), total on WatchlistItems
+*1:N since v05.* Every watchlist item is on exactly one list. An empty list is
+valid, so participation is partial on the `Watchlists` side. No attributes.
 
-| Attribute | Type | Constraints |
-|---|---|---|
-| `added_at` | timestamptz | required, defaults to now — recorded so a list can be shown in the order the user built it |
+#### Lists — Cryptos (1) : WatchlistItems (N), total on WatchlistItems
+*Added in v05.* Every watchlist item names exactly one crypto asset. An asset
+need not be on any list. No attributes.
 
 ## Entity-Relationship Model History
 
@@ -340,7 +391,38 @@ asset need not be on any list.
 
   Nothing existing was removed or changed. See
   [AdvancedDatabaseDevelopment](../P7-AdvancedDatabaseDevelopment/AdvancedDatabaseDevelopment.md).
-  The diagram files are `ERModel_v04.xml` / `ERModel_v04.png`; earlier versions
+  The diagram files are `ERModel_v04.xml` / `ERModel_v04.png`.
+- **v05 — correction after review.** The review of P2 found that two parts of
+  the model were implemented differently in the database:
+  - `Contains` was an M:N relationship in the model, but `watchlist_items`
+    has its own `id` primary key;
+  - `Holds` was an M:N relationship in the model, but `holdings` has its own
+    `id` primary key.
+
+  An M:N relationship has no identifier of its own; its table's key is the pair
+  of participating keys. A table with its own `id` is the implementation of an
+  entity set. Every phase after P2 (the prototype, the reports and the P7
+  logic) already uses the database as it is. So the **model** was corrected to
+  match P2, not the other way round:
+  - `Holds` (M:N, with attributes) became the entity set `Holdings` (its former
+    attributes plus `id`) with two 1:N relationships, `Holds` (Users → Holdings)
+    and `PositionIn` (Cryptos → Holdings), both total on the `Holdings` side;
+  - `Contains` (M:N, with `added_at`) became the entity set `WatchlistItems`
+    (`id`, `added_at`) with `Contains` (Watchlists → WatchlistItems) and
+    `Lists` (Cryptos → WatchlistItems), both total on the `WatchlistItems`
+    side;
+  - the former keys of the two relationships are kept as uniqueness rules
+    ("one holding per user and crypto", "an asset at most once per list");
+  - the key descriptions of `Markets`, `MarketTrades`, `MarketCandles` and
+    `Watchlists` no longer name foreign-key columns (`crypto_id`,
+    `market_id`, `user_id`), which do not exist in an ER model;
+  - the diagram was redrawn on a grid with no overlapping attributes. In v04,
+    `Watchlists.id` was hidden behind `added_at`, and several attributes of
+    `Orders`, `Transactions`, `MarketTrades` and `MarketCandles` overlapped.
+    The grid also makes it easier to compare the diagram with the P2
+    relational diagram.
+
+  The diagram files are `ERModel_v05.xml` / `ERModel_v05.png`; earlier versions
   are kept.
 
 Reasoning for the AI-assisted part of this phase, and the full interaction log,

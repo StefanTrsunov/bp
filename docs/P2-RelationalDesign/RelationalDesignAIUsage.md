@@ -11,7 +11,7 @@
 
 ### Diagram
 
-The student produces `relational_schema.jpg` in DBeaver from the live `project` schema; see [RelationalDesign](RelationalDesign.md) for instructions.
+`relational_diagram_v4.png` was exported by the student in DBeaver from the live `project` schema, with the tables in the same positions as the entity sets of `ERModel_v05.png`; see [RelationalDesign](RelationalDesign.md#how-to-regenerate-it) for instructions.
 
 ### Results in details / description
 
@@ -99,3 +99,37 @@ the transcript.
 **What I decided:** to add the `CHECK` constraint rather than rely on
 `trade.go` alone to keep the reservation consistent — the same reasoning
 already applied to `avg_price NOT NULL` in session 2.
+
+### Session 4 — 2026-09-29 (Claude Opus 5.5): correction after review
+
+**Prompt (student, excerpt):** I pasted the reviewer's comments on P2:
+
+> the `contains` relationship from the model is implemented differently in the database
+> the `holds` relationship from the model is implemented differently in the database
+> there may be other inconsistencies that are difficult to spot; the Phase 2 diagram should
+> have been created using DBeaver with a layout visually similar to the ERD
+
+> I suggest correcting only the Phase 1 model so that it matches Phase 2 [...] For Phase 2,
+> simply update the image according to the requirements.
+
+**Response (AI, summarised):**
+
+- Explained the mismatch. In the model, `Holds` and `Contains` were M:N relationships, whose
+  table key would be the pair `{user_id, crypto_id}` / `{watchlist_id, crypto_id}`. But
+  `holdings` and `watchlist_items` have their own `id` primary key, which is how an entity
+  set is implemented. Following the reviewer's advice, P1 was corrected (v05, entity sets
+  `Holdings` and `WatchlistItems`), and the database was not changed.
+- Found the other inconsistencies between this page and the live schema. The page was
+  missing `users.reserved_balance`, `orders.filled_quantity`, the status
+  `partially_filled`, `market_trades.buy_order_id` / `sell_order_id` and the whole
+  `order_events` table. The "10 tables", "5 indexes" and "the one nullable foreign key"
+  counts were also out of date (really 11 tables, 8 indexes in `schema_creation.sql`, and 3
+  nullable foreign keys).
+- Rewrote [RelationalDesign](RelationalDesign.md). Each relation is labelled with its entity
+  set and each foreign key with its relationship, and the transformation is a table of all
+  15 relationships → 15 foreign keys, with `NOT NULL` following participation.
+- Wrote export instructions with a table grid that mirrors `ERModel_v05.png`.
+
+**What I decided:** to correct P1 instead of the database, as the reviewer suggested. I
+exported `relational_diagram_v4.png` from DBeaver myself, with the tables arranged like the
+ER diagram.
